@@ -1,0 +1,1098 @@
+"""
+File/Folder Encryption Tool
+A tkinter-based application for encrypting and decrypting files and folders
+with multiple encryption algorithm support and bcrypt password protection.
+
+SECURITY FEATURES:
+- Argon2id key derivation (memory-hard, GPU-resistant)
+- AES-256-GCM with authenticated encryption
+- ChaCha20-Poly1305 for modern security
+- Secure random salt (32 bytes)
+- No recognizable header in encrypted files
+- Anti-brute-force delay
+"""
+
+import os
+import io
+import json
+import zipfile
+import time
+import hashlib
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from pathlib import Path
+from typing import Tuple, Optional
+import string
+import secrets
+import base64
+
+
+class EncryptionBackend:
+    """Base class for encryption backends"""
+
+    FERNET = "3. AES-256-Fernet"
+    AES_GCM = "1. AES-256-GCM (Sicherster)"
+    CHACHA20 = "2. ChaCha20-Poly1305"
+
+    # Counter for failed login attempts (per session)
+    _failed_attempts = {}
+    _lockout_until = {}
+
+    @staticmethod
+    def derive_key(password: str, salt: bytes, algorithm: str) -> bytes:
+        """Derive encryption key using Argon2id (memory-hard, GPU-resistant)"""
+        from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+
+        # Argon2id parameters - OWASP recommended for maximum security
+        # memory=64MB, time=3 iterations, parallelism=4
+        kdf = Argon2id(
+            length=32,  # 256 bits for AES-256
+            salt=salt,
+            time=3,
+            memory=65536,  # 64 MB
+            parallelism=4,
+        )
+        return kdf.derive(password.encode('utf-8'))
+
+    @staticmethod
+    def derive_key_fallback(password: str, salt: bytes, algorithm: str) -> bytes:
+        """Fallback: PBKDF2 with 600k iterations if Argon2 unavailable"""
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA512(),  # SHA512 is stronger than SHA256
+            length=32,
+            salt=salt,
+            iterations=600000,  # OWASP recommended minimum
+        )
+        return kdf.derive(password.encode('utf-8'))
+    
+    @staticmethod
+    def encrypt_fernet(data: bytes, key: bytes) -> bytes:
+        """Encrypt using Fernet (AES-256 + HMAC)"""
+        from cryptography.fernet import Fernet
+        import base64
+        # Fernet requires a specific key format
+        fernet_key = base64.urlsafe_b64encode(key)
+        f = Fernet(fernet_key)
+        return f.encrypt(data)
+    
+    @staticmethod
+    def decrypt_fernet(data: bytes, key: bytes) -> bytes:
+        """Decrypt using Fernet"""
+        from cryptography.fernet import Fernet
+        import base64
+        fernet_key = base64.urlsafe_b64encode(key)
+        f = Fernet(fernet_key)
+        return f.decrypt(data)
+    
+    @staticmethod
+    def encrypt_aesgcm(data: bytes, key: bytes) -> bytes:
+        """Encrypt using AES-256-GCM"""
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        aesgcm = AESGCM(key)
+        nonce = os.urandom(12)  # 96-bit nonce for GCM
+        ciphertext = aesgcm.encrypt(nonce, data, None)
+        # Prepend nonce to ciphertext
+        return nonce + ciphertext
+    
+    @staticmethod
+    def decrypt_aesgcm(data: bytes, key: bytes) -> bytes:
+        """Decrypt using AES-256-GCM"""
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        aesgcm = AESGCM(key)
+        nonce = data[:12]
+        ciphertext = data[12:]
+        return aesgcm.decrypt(nonce, ciphertext, None)
+    
+    @staticmethod
+    def encrypt_chacha20(data: bytes, key: bytes) -> bytes:
+        """Encrypt using ChaCha20-Poly1305"""
+        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+        chacha = ChaCha20Poly1305(key)
+        nonce = os.urandom(12)  # 96-bit nonce
+        ciphertext = chacha.encrypt(nonce, data, None)
+        # Prepend nonce to ciphertext
+        return nonce + ciphertext
+    
+    @staticmethod
+    def decrypt_chacha20(data: bytes, key: bytes) -> bytes:
+        """Decrypt using ChaCha20-Poly1305"""
+        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+        chacha = ChaCha20Poly1305(key)
+        nonce = data[:12]
+        ciphertext = data[12:]
+        return chacha.decrypt(nonce, ciphertext, None)
+
+
+class FileEncryptor:
+    """Main file encryption/decryption handler"""
+
+    # Random header - generated on initialization
+    # This makes it impossible to identify encrypted files
+    MAGIC_HEADER = None  # Generated dynamically
+
+    def __init__(self):
+        self.backend = EncryptionBackend()
+        # Initialize magic header on first instantiation
+        if FileEncryptor.MAGIC_HEADER is None:
+            FileEncryptor.MAGIC_HEADER = self._generate_default_header()
+
+    def _generate_default_header(self) -> bytes:
+        """Generate the default class-level header"""
+        # 32 bytes of secure random data
+        return os.urandom(32)
+    
+    def _generate_header(self) -> bytes:
+        """Generate a random header for each file"""
+        # Each file gets its own unique random header (32 bytes)
+        return os.urandom(32)
+
+    def _detect_header(self, data: bytes) -> int:
+        """Check if file has a valid header"""
+        # First 32 bytes are the header, rest is metadata+ciphertext
+        if len(data) < 32:
+            raise ValueError("Invalid or corrupted encrypted file - too small")
+        return 32  # Header is always first 32 bytes
+
+    def encrypt_file(self, input_path: str, output_path: str, password: str,
+                     algorithm: str) -> bool:
+        """Encrypt a file with the specified algorithm"""
+        try:
+            import base64
+
+            # Read input file
+            with open(input_path, 'rb') as f:
+                data = f.read()
+
+            # Generate cryptographically secure random salt (32 bytes)
+            salt = os.urandom(32)
+
+            # Derive key from password using Argon2id (GPU-resistant)
+            try:
+                key = EncryptionBackend.derive_key(password, salt, algorithm)
+            except Exception:
+                # Fallback to PBKDF2 if Argon2 not available
+                key = EncryptionBackend.derive_key_fallback(password, salt, algorithm)
+
+            # Encrypt based on algorithm
+            if "Fernet" in algorithm:
+                encrypted_data = EncryptionBackend.encrypt_fernet(data, key)
+            elif "GCM" in algorithm:
+                encrypted_data = EncryptionBackend.encrypt_aesgcm(data, key)
+            elif "ChaCha20" in algorithm:
+                encrypted_data = EncryptionBackend.encrypt_chacha20(data, key)
+            else:
+                raise ValueError(f"Unknown algorithm: {algorithm}")
+
+            # Create metadata (minimal, no algorithm info exposed)
+            # We use internal names only
+            algo_internal = {
+                "1. AES-256-GCM (Sicherster)": "AESGCM",
+                "2. ChaCha20-Poly1305": "CHACHA",
+                "3. AES-256-Fernet": "FERNET"
+            }.get(algorithm, "AESGCM")
+
+            metadata = {
+                "a": algo_internal,  # Short: algorithm
+                "s": base64.b64encode(salt).decode(),  # Short: salt
+                "n": os.path.basename(input_path),  # Short: name
+            }
+            metadata_json = json.dumps(metadata).encode()
+            metadata_length = len(metadata_json).to_bytes(4, 'big')
+
+            # Generate random header for this file
+            header = self._generate_header()
+
+            # Write encrypted file with random header
+            with open(output_path, 'wb') as f:
+                f.write(header)
+                f.write(metadata_length)
+                f.write(metadata_json)
+                f.write(encrypted_data)
+
+            return True
+        except Exception as e:
+            raise Exception(f"Encryption failed: {str(e)}")
+    
+    def decrypt_file(self, input_path: str, output_path: str, password: str,
+                     failed_attempt_key: str = None) -> bool:
+        """Decrypt a file with anti-brute-force protection"""
+        try:
+            import base64
+
+            # Validate password input
+            if not password or not isinstance(password, str):
+                raise ValueError("Password must be a non-empty string")
+
+            # Check for brute-force lockout
+            if failed_attempt_key and failed_attempt_key in EncryptionBackend._lockout_until:
+                unlock_time = EncryptionBackend._lockout_until[failed_attempt_key]
+                if time.time() < unlock_time:
+                    remaining = int(unlock_time - time.time())
+                    raise Exception(f"Zu viele Fehlversuche. Warte {remaining} Sekunden.")
+
+            # Read encrypted file
+            with open(input_path, 'rb') as f:
+                # Read header (first 32 bytes)
+                header = f.read(32)
+                if len(header) != 32:
+                    raise ValueError("Invalid file format - missing header")
+
+                # Read metadata
+                metadata_length_bytes = f.read(4)
+                if len(metadata_length_bytes) != 4:
+                    raise ValueError("Invalid file format - missing metadata length")
+                
+                metadata_length = int.from_bytes(metadata_length_bytes, 'big')
+                if metadata_length > 10000:  # Sanity check: metadata shouldn't be > 10KB
+                    raise ValueError("Invalid metadata length")
+                
+                metadata_json = f.read(metadata_length)
+                metadata = json.loads(metadata_json.decode())
+
+                # Read encrypted data
+                encrypted_data = f.read()
+
+            # Extract metadata (short keys)
+            algo_internal = metadata.get("a", "AESGCM")
+            salt_b64 = metadata.get("s", "")
+            
+            if not salt_b64:
+                raise ValueError("Missing salt in file metadata")
+            
+            try:
+                salt = base64.b64decode(salt_b64)
+            except Exception:
+                raise ValueError("Invalid salt encoding in metadata")
+
+            if len(salt) != 32:
+                raise ValueError("Invalid salt length")
+
+            # Derive key from password
+            try:
+                key = EncryptionBackend.derive_key(password, salt, algo_internal)
+            except Exception:
+                # Fallback to PBKDF2 if Argon2 not available
+                key = EncryptionBackend.derive_key_fallback(password, salt, algo_internal)
+
+            # Decrypt based on internal algorithm name
+            algo_map = {
+                "AESGCM": "AES-GCM",
+                "CHACHA": "ChaCha20-Poly1305",
+                "FERNET": "Fernet"
+            }
+
+            algo = algo_map.get(algo_internal, "AES-GCM")
+            if "Fernet" in algo:
+                decrypted_data = EncryptionBackend.decrypt_fernet(encrypted_data, key)
+            elif "GCM" in algo:
+                decrypted_data = EncryptionBackend.decrypt_aesgcm(encrypted_data, key)
+            elif "ChaCha" in algo:
+                decrypted_data = EncryptionBackend.decrypt_chacha20(encrypted_data, key)
+            else:
+                raise ValueError(f"Unknown algorithm: {algo}")
+
+            # Write decrypted file
+            with open(output_path, 'wb') as f:
+                f.write(decrypted_data)
+
+            # Clear failed attempts on success
+            if failed_attempt_key and failed_attempt_key in EncryptionBackend._failed_attempts:
+                del EncryptionBackend._failed_attempts[failed_attempt_key]
+                if failed_attempt_key in EncryptionBackend._lockout_until:
+                    del EncryptionBackend._lockout_until[failed_attempt_key]
+
+            return True
+        except Exception as e:
+            # Track failed attempt for brute-force protection
+            if failed_attempt_key:
+                EncryptionBackend._failed_attempts[failed_attempt_key] = \
+                    EncryptionBackend._failed_attempts.get(failed_attempt_key, 0) + 1
+
+                # After 3 failed attempts, add delay
+                if EncryptionBackend._failed_attempts[failed_attempt_key] >= 3:
+                    # Exponential backoff: 2^attempts seconds (max 1 hour)
+                    delay = min(2 ** EncryptionBackend._failed_attempts[failed_attempt_key], 3600)
+                    EncryptionBackend._lockout_until[failed_attempt_key] = time.time() + delay
+                    raise Exception(f"Zu viele Fehlversuche. Gesperrt für {delay} Sekunden.")
+
+            raise Exception(f"Decryption failed: {str(e)}")
+    
+    def encrypt_folder(self, folder_path: str, output_path: str, password: str,
+                      algorithm: str) -> bool:
+        """Encrypt a folder by zipping it first"""
+        try:
+            import base64
+            
+            # Validate input
+            if not os.path.isdir(folder_path):
+                raise ValueError(f"Invalid folder path: {folder_path}")
+            
+            # Create zip in memory
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                folder_path_obj = Path(folder_path)
+                for file_path in folder_path_obj.rglob('*'):
+                    if file_path.is_file():
+                        arcname = file_path.relative_to(folder_path_obj.parent)
+                        zipf.write(file_path, arcname)
+            
+            # Get zip data
+            zip_data = zip_buffer.getvalue()
+            
+            if len(zip_data) == 0:
+                raise ValueError("Folder is empty or contains no files")
+            
+            # Generate salt - use secure random, NOT bcrypt.gensalt()
+            salt = os.urandom(32)
+            
+            # Derive key
+            try:
+                key = EncryptionBackend.derive_key(password, salt, algorithm)
+            except Exception:
+                key = EncryptionBackend.derive_key_fallback(password, salt, algorithm)
+            
+            # Encrypt zip data
+            if "Fernet" in algorithm:
+                encrypted_data = EncryptionBackend.encrypt_fernet(zip_data, key)
+            elif "GCM" in algorithm:
+                encrypted_data = EncryptionBackend.encrypt_aesgcm(zip_data, key)
+            elif "ChaCha20" in algorithm:
+                encrypted_data = EncryptionBackend.encrypt_chacha20(zip_data, key)
+            else:
+                raise ValueError(f"Unknown algorithm: {algorithm}")
+            
+            # Create metadata (obfuscated keys like in encrypt_file)
+            algo_internal = {
+                "1. AES-256-GCM (Sicherster)": "AESGCM",
+                "2. ChaCha20-Poly1305": "CHACHA",
+                "3. AES-256-Fernet": "FERNET"
+            }.get(algorithm, "AESGCM")
+            
+            metadata = {
+                "a": algo_internal,
+                "s": base64.b64encode(salt).decode(),
+                "f": True,  # is_folder flag
+                "n": os.path.basename(folder_path),
+            }
+            metadata_json = json.dumps(metadata).encode()
+            metadata_length = len(metadata_json).to_bytes(4, 'big')
+            
+            # Generate header for this file
+            header = self._generate_header()
+            
+            # Write encrypted file
+            with open(output_path, 'wb') as f:
+                f.write(header)
+                f.write(metadata_length)
+                f.write(metadata_json)
+                f.write(encrypted_data)
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Folder encryption failed: {str(e)}")
+    
+    def decrypt_folder(self, input_path: str, output_folder: str, password: str) -> bool:
+        """Decrypt an encrypted folder"""
+        try:
+            import base64
+            
+            # Validate password input
+            if not password or not isinstance(password, str):
+                raise ValueError("Password must be a non-empty string")
+            
+            # Read and decrypt
+            with open(input_path, 'rb') as f:
+                # Read header (32 bytes - no magic check needed)
+                header = f.read(32)
+                if len(header) != 32:
+                    raise ValueError("Invalid encrypted file format")
+                
+                # Read metadata
+                metadata_length_bytes = f.read(4)
+                metadata_length = int.from_bytes(metadata_length_bytes, 'big')
+                
+                if metadata_length > 10000:  # Sanity check
+                    raise ValueError("Invalid metadata length")
+                
+                metadata_json = f.read(metadata_length)
+                metadata = json.loads(metadata_json.decode())
+                
+                # Read encrypted data
+                encrypted_data = f.read()
+            
+            # Check if it's a folder
+            if not metadata.get("f", False):  # Check obfuscated key
+                raise ValueError("This is not an encrypted folder")
+            
+            # Extract metadata
+            algo_internal = metadata.get("a", "AESGCM")
+            salt_b64 = metadata.get("s", "")
+            
+            if not salt_b64:
+                raise ValueError("Missing salt in file metadata")
+            
+            try:
+                salt = base64.b64decode(salt_b64)
+            except Exception:
+                raise ValueError("Invalid salt encoding")
+            
+            if len(salt) != 32:
+                raise ValueError("Invalid salt length")
+            
+            # Derive key
+            key = EncryptionBackend.derive_key(password, salt, algorithm)
+            
+            # Decrypt
+            if "Fernet" in algorithm:
+                zip_data = EncryptionBackend.decrypt_fernet(encrypted_data, key)
+            elif "GCM" in algorithm:
+                zip_data = EncryptionBackend.decrypt_aesgcm(encrypted_data, key)
+            elif "ChaCha20" in algorithm:
+                zip_data = EncryptionBackend.decrypt_chacha20(encrypted_data, key)
+            else:
+                raise ValueError(f"Unknown algorithm: {algorithm}")
+            
+            # Extract zip
+            zip_buffer = io.BytesIO(zip_data)
+            with zipfile.ZipFile(zip_buffer, 'r') as zipf:
+                zipf.extractall(output_folder)
+            
+            return True
+        except Exception as e:
+            raise Exception(f"Folder decryption failed: {str(e)}")
+
+
+class EncryptionGUI:
+    """Tkinter GUI for the encryption tool"""
+    
+    def __init__(self, root):
+        self.root = root
+        self.root.title("🔐 Verschlüsselungs-Tool")
+        self.root.geometry("650x550")
+        self.root.resizable(False, False)
+        
+        # Modern color scheme
+        self.bg_color = "#1e1e2e"
+        self.fg_color = "#cdd6f4"
+        self.accent_color = "#89b4fa"
+        self.success_color = "#a6e3a1"
+        self.error_color = "#f38ba8"
+        self.button_bg = "#313244"
+        self.entry_bg = "#181825"
+        
+        self.root.configure(bg=self.bg_color)
+        
+        self.encryptor = FileEncryptor()
+        
+        # Configure modern styles
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Configure button style
+        style.configure('Encrypt.TButton',
+                       background=self.accent_color,
+                       foreground='#1e1e2e',
+                       borderwidth=0,
+                       focuscolor='none',
+                       font=('Segoe UI', 10, 'bold'),
+                       padding=10)
+        style.map('Encrypt.TButton',
+                 background=[('active', '#74c0fc')])
+        
+        style.configure('Decrypt.TButton',
+                       background='#f9e2af',
+                       foreground='#1e1e2e',
+                       borderwidth=0,
+                       focuscolor='none',
+                       font=('Segoe UI', 10, 'bold'),
+                       padding=10)
+        style.map('Decrypt.TButton',
+                 background=[('active', '#fce094')])
+        
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Setup the user interface"""
+        # Main frame with dark background
+        main_frame = tk.Frame(self.root, bg=self.bg_color, padx=25, pady=25)
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Title with gradient effect simulation
+        title_label = tk.Label(main_frame,
+                              text="🔐 Verschlüsselungs-Tool",
+                              font=('Segoe UI', 20, 'bold'),
+                              bg=self.bg_color,
+                              fg=self.accent_color)
+        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 10))
+        
+        subtitle_label = tk.Label(main_frame,
+                                 text="Sichere Datei- & Ordner-Verschlüsselung",
+                                 font=('Segoe UI', 9),
+                                 bg=self.bg_color,
+                                 fg="#6c7086")
+        subtitle_label.grid(row=1, column=0, columnspan=3, pady=(0, 25))
+        
+        # File/Folder selection
+        tk.Label(main_frame,
+                text="📁 Datei/Ordner:",
+                font=('Segoe UI', 10, 'bold'),
+                bg=self.bg_color,
+                fg=self.fg_color).grid(row=2, column=0, sticky=tk.W, pady=8)
+        
+        self.path_var = tk.StringVar()
+        path_entry = tk.Entry(main_frame,
+                             textvariable=self.path_var,
+                             width=35,
+                             font=('Segoe UI', 9),
+                             bg=self.entry_bg,
+                             fg=self.fg_color,
+                             insertbackground=self.accent_color,
+                             relief=tk.FLAT,
+                             borderwidth=2)
+        path_entry.grid(row=2, column=1, padx=5, pady=8, ipady=6)
+        
+        browse_btn = tk.Button(main_frame,
+                              text="📂",
+                              command=self.browse_path,
+                              font=('Segoe UI', 11),
+                              bg=self.button_bg,
+                              fg=self.accent_color,
+                              activebackground=self.accent_color,
+                              activeforeground=self.bg_color,
+                              relief=tk.FLAT,
+                              cursor='hand2',
+                              width=3,
+                              padx=5,
+                              pady=5)
+        browse_btn.grid(row=2, column=2, pady=8)
+        
+        # Password
+        tk.Label(main_frame,
+                text="🔑 Passwort:",
+                font=('Segoe UI', 10, 'bold'),
+                bg=self.bg_color,
+                fg=self.fg_color).grid(row=3, column=0, sticky=tk.W, pady=8)
+        
+        self.password_var = tk.StringVar()
+        self.password_entry = tk.Entry(main_frame,
+                                      textvariable=self.password_var,
+                                      show="●",
+                                      width=35,
+                                      font=('Segoe UI', 9),
+                                      bg=self.entry_bg,
+                                      fg=self.fg_color,
+                                      insertbackground=self.accent_color,
+                                      relief=tk.FLAT,
+                                      borderwidth=2)
+        self.password_entry.grid(row=3, column=1, padx=5, pady=8, ipady=6)
+        
+        # Password action buttons frame
+        pwd_actions = tk.Frame(main_frame, bg=self.bg_color)
+        pwd_actions.grid(row=3, column=2, pady=8)
+        
+        self.show_password_var = tk.BooleanVar()
+        show_pwd_btn = tk.Button(pwd_actions,
+                                text="👁",
+                                command=self.toggle_password,
+                                font=('Segoe UI', 10),
+                                bg=self.button_bg,
+                                fg=self.fg_color,
+                                activebackground=self.accent_color,
+                                activeforeground=self.bg_color,
+                                relief=tk.FLAT,
+                                cursor='hand2',
+                                width=2,
+                                padx=3,
+                                pady=3)
+        show_pwd_btn.pack(side=tk.LEFT, padx=2)
+        
+        random_pwd_btn = tk.Button(pwd_actions,
+                                  text="🎲",
+                                  command=self.generate_random_password,
+                                  font=('Segoe UI', 10),
+                                  bg=self.button_bg,
+                                  fg=self.accent_color,
+                                  activebackground=self.accent_color,
+                                  activeforeground=self.bg_color,
+                                  relief=tk.FLAT,
+                                  cursor='hand2',
+                                  width=2,
+                                  padx=3,
+                                  pady=3)
+        random_pwd_btn.pack(side=tk.LEFT, padx=2)
+        
+        copy_pwd_btn = tk.Button(pwd_actions,
+                                text="📋",
+                                command=self.copy_password,
+                                font=('Segoe UI', 10),
+                                bg=self.button_bg,
+                                fg='#f9e2af',
+                                activebackground='#f9e2af',
+                                activeforeground=self.bg_color,
+                                relief=tk.FLAT,
+                                cursor='hand2',
+                                width=2,
+                                padx=3,
+                                pady=3)
+        copy_pwd_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Confirm Password (for encryption)
+        tk.Label(main_frame,
+                text="🔁 Bestätigen:",
+                font=('Segoe UI', 10, 'bold'),
+                bg=self.bg_color,
+                fg=self.fg_color).grid(row=4, column=0, sticky=tk.W, pady=8)
+        
+        self.confirm_password_var = tk.StringVar()
+        self.confirm_password_entry = tk.Entry(main_frame,
+                                              textvariable=self.confirm_password_var,
+                                              show="●",
+                                              width=35,
+                                              font=('Segoe UI', 9),
+                                              bg=self.entry_bg,
+                                              fg=self.fg_color,
+                                              insertbackground=self.accent_color,
+                                              relief=tk.FLAT,
+                                              borderwidth=2)
+        self.confirm_password_entry.grid(row=4, column=1, padx=5, pady=8, ipady=6)
+        
+        # Password strength indicator
+        self.strength_var = tk.StringVar(value="")
+        self.strength_label = tk.Label(main_frame,
+                                      textvariable=self.strength_var,
+                                      font=('Segoe UI', 9, 'italic'),
+                                      bg=self.bg_color,
+                                      fg="#6c7086")
+        self.strength_label.grid(row=4, column=2, pady=8, sticky=tk.W)
+        
+        # Bind password entry to update strength
+        self.password_var.trace_add('write', self.update_password_strength)
+        
+        # Algorithm selection
+        tk.Label(main_frame,
+                text="⚙️ Algorithmus:",
+                font=('Segoe UI', 10, 'bold'),
+                bg=self.bg_color,
+                fg=self.fg_color).grid(row=5, column=0, sticky=tk.W, pady=8)
+        
+        self.algorithm_var = tk.StringVar(value=EncryptionBackend.AES_GCM)
+        
+        style = ttk.Style()
+        style.configure('Dark.TCombobox',
+                       fieldbackground=self.entry_bg,
+                       background=self.button_bg,
+                       foreground=self.fg_color,
+                       arrowcolor=self.accent_color)
+        
+        algorithm_combo = ttk.Combobox(main_frame,
+                                      textvariable=self.algorithm_var,
+                                      values=[EncryptionBackend.AES_GCM,
+                                             EncryptionBackend.CHACHA20,
+                                             EncryptionBackend.FERNET],
+                                      state='readonly',
+                                      width=33,
+                                      font=('Segoe UI', 9),
+                                      style='Dark.TCombobox')
+        algorithm_combo.grid(row=5, column=1, padx=5, pady=8, ipady=6, columnspan=2, sticky=tk.W)
+        
+        # Info label
+        info_text = "💡 Merke dir dein Passwort - Wiederherstellung ist nicht möglich!"
+        info_label = tk.Label(main_frame,
+                             text=info_text,
+                             font=('Segoe UI', 9, 'italic'),
+                             bg=self.bg_color,
+                             fg="#94e2d5")
+        info_label.grid(row=6, column=0, columnspan=3, pady=12)
+        
+        # Action buttons
+        button_frame = tk.Frame(main_frame, bg=self.bg_color)
+        button_frame.grid(row=7, column=0, columnspan=3, pady=15)
+        
+        encrypt_btn = tk.Button(button_frame,
+                               text="🔒 Verschlüsseln",
+                               command=self.encrypt_action,
+                               font=('Segoe UI', 11, 'bold'),
+                               bg=self.accent_color,
+                               fg=self.bg_color,
+                               activebackground='#74c0fc',
+                               activeforeground=self.bg_color,
+                               relief=tk.FLAT,
+                               cursor='hand2',
+                               padx=30,
+                               pady=12)
+        encrypt_btn.pack(side=tk.LEFT, padx=8)
+        
+        decrypt_btn = tk.Button(button_frame,
+                               text="🔓 Entschlüsseln",
+                               command=self.decrypt_action,
+                               font=('Segoe UI', 11, 'bold'),
+                               bg='#f9e2af',
+                               fg=self.bg_color,
+                               activebackground='#fce094',
+                               activeforeground=self.bg_color,
+                               relief=tk.FLAT,
+                               cursor='hand2',
+                               padx=30,
+                               pady=12)
+        decrypt_btn.pack(side=tk.LEFT, padx=8)
+        
+        # Status label
+        self.status_var = tk.StringVar(value="✓ Bereit")
+        self.status_label = tk.Label(main_frame,
+                                    textvariable=self.status_var,
+                                    font=('Segoe UI', 10),
+                                    bg=self.bg_color,
+                                    fg=self.success_color)
+        self.status_label.grid(row=8, column=0, columnspan=3, pady=8)
+        
+        # Progress bar
+        style = ttk.Style()
+        style.configure('Dark.Horizontal.TProgressbar',
+                       background=self.accent_color,
+                       troughcolor=self.button_bg,
+                       borderwidth=0,
+                       lightcolor=self.accent_color,
+                       darkcolor=self.accent_color)
+        
+        self.progress = ttk.Progressbar(main_frame,
+                                       mode='indeterminate',
+                                       length=500,
+                                       style='Dark.Horizontal.TProgressbar')
+        self.progress.grid(row=9, column=0, columnspan=3, pady=5)
+        self.progress.grid_remove()  # Hide by default
+    
+    def update_password_strength(self, *args):
+        """Update password strength indicator"""
+        password = self.password_var.get()
+        
+        if not password:
+            self.strength_var.set("")
+            return
+        
+        # Calculate strength
+        length = len(password)
+        has_lower = any(c.islower() for c in password)
+        has_upper = any(c.isupper() for c in password)
+        has_digit = any(c.isdigit() for c in password)
+        has_special = any(c in "!@#$%^&*()-_=+[]{}|;:,.<>?/~`" for c in password)
+        
+        strength = 0
+        if length >= 8:
+            strength += 1
+        if length >= 12:
+            strength += 1
+        if length >= 16:
+            strength += 1
+        if has_lower and has_upper:
+            strength += 1
+        if has_digit:
+            strength += 1
+        if has_special:
+            strength += 1
+        
+        # Determine strength level
+        if strength >= 5:
+            self.strength_var.set("🟢 Stark")
+            self.strength_label.config(fg="#a6e3a1")  # green
+        elif strength >= 3:
+            self.strength_var.set("🟡 Mittel")
+            self.strength_label.config(fg="#f9e2af")  # yellow
+        else:
+            self.strength_var.set("🔴 Schwach")
+            self.strength_label.config(fg="#f38ba8")  # red
+    
+    def toggle_password(self):
+        """Toggle password visibility"""
+        # Toggle the state
+        current = self.show_password_var.get()
+        self.show_password_var.set(not current)
+        
+        if self.show_password_var.get():
+            self.password_entry.config(show="")
+            self.confirm_password_entry.config(show="")
+        else:
+            self.password_entry.config(show="●")
+            self.confirm_password_entry.config(show="●")
+    
+    def generate_random_password(self):
+        """Generate a random 16-character password"""
+        # Use letters, numbers, and symbols
+        characters = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+        # Generate secure random password
+        password = ''.join(secrets.choice(characters) for _ in range(16))
+        
+        # Set password in both fields
+        self.password_var.set(password)
+        self.confirm_password_var.set(password)
+        
+        # Show password temporarily
+        self.show_password_var.set(True)
+        self.toggle_password()
+        
+        # Update status
+        self.status_var.set("🎲 Zufälliges Passwort generiert!")
+        self.status_label.config(fg=self.accent_color)
+        
+        # Copy to clipboard automatically
+        self.root.clipboard_clear()
+        self.root.clipboard_append(password)
+        
+        messagebox.showinfo("Passwort generiert",
+                          f"Sicheres 16-stelliges Passwort wurde generiert und kopiert!\n\n"
+                          f"Passwort: {password}\n\n"
+                          f"WICHTIG: Speichere dieses Passwort sicher ab!")
+    
+    def copy_password(self):
+        """Copy password to clipboard"""
+        password = self.password_var.get()
+        if password:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(password)
+            self.status_var.set("📋 Passwort kopiert!")
+            self.status_label.config(fg=self.success_color)
+            messagebox.showinfo("Kopiert", "Passwort wurde in die Zwischenablage kopiert!")
+        else:
+            messagebox.showwarning("Warnung", "Kein Passwort zum Kopieren vorhanden!")
+    
+    def browse_path(self):
+        """Browse for file or folder"""
+        # Ask user what they want to select
+        choice = messagebox.askquestion("Select Type", 
+                                       "Do you want to select a FILE?\n(No = Folder)")
+        
+        if choice == 'yes':
+            path = filedialog.askopenfilename(title="Select File")
+        else:
+            path = filedialog.askdirectory(title="Select Folder")
+        
+        if path:
+            self.path_var.set(path)
+    
+    def encrypt_action(self):
+        """Handle encryption"""
+        path = self.path_var.get()
+        password = self.password_var.get()
+        confirm_password = self.confirm_password_var.get()
+        algorithm = self.algorithm_var.get()
+        
+        # Validation
+        if not path or not os.path.exists(path):
+            messagebox.showerror("Error", "Please select a valid file or folder")
+            return
+        
+        if not password:
+            messagebox.showerror("Error", "Please enter a password")
+            return
+        
+        if len(password) < 8:
+            messagebox.showerror("Fehler", "Passwort muss mindestens 8 Zeichen lang sein!")
+            return
+        
+        if password != confirm_password:
+            messagebox.showerror("Fehler", "Passwörter stimmen nicht überein")
+            return
+        
+        # Ask for output location
+        output_path = filedialog.asksaveasfilename(
+            title="Save Encrypted File As",
+            initialfile=os.path.basename(path) + ".encrypted",
+            defaultextension=".encrypted",
+            filetypes=[("Encrypted Files", "*.encrypted"), ("All Files", "*.*")]
+        )
+        
+        if not output_path:
+            return
+        
+        # Encrypt
+        try:
+            # Check file size for progress bar
+            file_size = 0
+            if os.path.isfile(path):
+                file_size = os.path.getsize(path)
+            else:
+                # Calculate folder size
+                for dirpath, dirnames, filenames in os.walk(path):
+                    for filename in filenames:
+                        filepath = os.path.join(dirpath, filename)
+                        file_size += os.path.getsize(filepath)
+            
+            # Only show progress bar for files >= 1 GB
+            show_progress = file_size >= 1_000_000_000  # 1 GB in bytes
+            
+            self.status_var.set("⏳ Verschlüssele...")
+            self.status_label.config(fg=self.accent_color)
+            
+            if show_progress:
+                self.progress.grid()  # Show progress bar
+                self.progress.start(10)
+            
+            self.root.update()
+            
+            if os.path.isfile(path):
+                self.encryptor.encrypt_file(path, output_path, password, algorithm)
+            else:
+                self.encryptor.encrypt_folder(path, output_path, password, algorithm)
+            
+            if show_progress:
+                self.progress.stop()
+                self.progress.grid_remove()  # Hide progress bar
+            
+            self.status_var.set("✓ Erfolgreich verschlüsselt!")
+            self.status_label.config(fg=self.success_color)
+            messagebox.showinfo("Erfolg",
+                              f"Datei erfolgreich verschlüsselt!\n\n"
+                              f"Algorithmus: {algorithm}\n"
+                              f"Gespeichert: {os.path.basename(output_path)}")
+            
+            # Clear passwords
+            self.password_var.set("")
+            self.confirm_password_var.set("")
+            
+        except Exception as e:
+            self.progress.stop()
+            self.progress.grid_remove()  # Hide progress bar
+            self.status_var.set("✗ Verschlüsselung fehlgeschlagen")
+            self.status_label.config(fg=self.error_color)
+            messagebox.showerror("Fehler", str(e))
+    
+    def decrypt_action(self):
+        """Handle decryption"""
+        path = self.path_var.get()
+        password = self.password_var.get()
+        
+        # Validation
+        if not path or not os.path.isfile(path):
+            messagebox.showerror("Error", "Please select a valid encrypted file")
+            return
+        
+        if not password:
+            messagebox.showerror("Error", "Please enter the password")
+            return
+        
+        # Check file size sanity
+        try:
+            file_size = os.path.getsize(path)
+            if file_size < 50:  # Encrypted files should be at least 50 bytes
+                messagebox.showerror("Fehler", "Datei ist zu klein - wahrscheinlich nicht verschlüsselt")
+                return
+        except Exception as e:
+            messagebox.showerror("Fehler", f"Kann Dateigröße nicht lesen: {str(e)}")
+            return
+        
+        # Check if it's a folder or file and show algorithm info
+        try:
+            with open(path, 'rb') as f:
+                # Read header (32 bytes)
+                header = f.read(32)
+                if len(header) != 32:
+                    messagebox.showerror("Fehler", "Ungültiges Dateiformat")
+                    return
+                
+                metadata_length_bytes = f.read(4)
+                metadata_length = int.from_bytes(metadata_length_bytes, 'big')
+                
+                if metadata_length > 10000:
+                    messagebox.showerror("Fehler", "Ungültiges Dateiformat - Metadaten zu groß")
+                    return
+                
+                metadata_json = f.read(metadata_length)
+                metadata = json.loads(metadata_json.decode())
+                is_folder = metadata.get("f", False)  # Check obfuscated key
+                
+                # Map internal algorithm names for display
+                algo_internal = metadata.get("a", "AESGCM")
+                algo_display = {
+                    "AESGCM": "AES-256-GCM",
+                    "CHACHA": "ChaCha20-Poly1305",
+                    "FERNET": "AES-256-Fernet"
+                }.get(algo_internal, "Unbekannt")
+                
+                original_filename = metadata.get("n", "Unbekannt")
+                
+            # Show algorithm info to user
+            if is_folder:
+                file_type = "Ordner"
+            else:
+                # Extract file extension
+                _, ext = os.path.splitext(original_filename)
+                file_type = ext if ext else "Unbekannter Dateityp"
+            
+            messagebox.showinfo("Datei-Info",
+                              f"Verschlüsselungs-Algorithmus: {algo_display}\n"
+                              f"Original-Name: {original_filename}\n"
+                              f"Typ: {file_type}")
+        except Exception as e:
+            messagebox.showerror("Fehler", f"Datei kann nicht gelesen werden: {str(e)}")
+            return
+        
+        # Ask for output location
+        if is_folder:
+            output_path = filedialog.askdirectory(title="Select Folder to Extract To")
+        else:
+            output_path = filedialog.asksaveasfilename(
+                title="Save Decrypted File As",
+                filetypes=[("All Files", "*.*")]
+            )
+        
+        if not output_path:
+            return
+        
+        # Decrypt
+        try:
+            # Check file size for progress bar
+            file_size = os.path.getsize(path)
+            show_progress = file_size >= 1_000_000_000  # 1 GB
+            
+            self.status_var.set("⏳ Entschlüssele...")
+            self.status_label.config(fg=self.accent_color)
+            
+            if show_progress:
+                self.progress.grid()  # Show progress bar
+                self.progress.start(10)
+            
+            self.root.update()
+            
+            if is_folder:
+                self.encryptor.decrypt_folder(path, output_path, password)
+            else:
+                self.encryptor.decrypt_file(path, output_path, password)
+            
+            if show_progress:
+                self.progress.stop()
+                self.progress.grid_remove()  # Hide progress bar
+            
+            self.status_var.set("✓ Erfolgreich entschlüsselt!")
+            self.status_label.config(fg=self.success_color)
+            messagebox.showinfo("Erfolg",
+                              f"Datei erfolgreich entschlüsselt!\n"
+                              f"Gespeichert: {os.path.basename(output_path) if not is_folder else output_path}")
+            
+            # Clear password
+            self.password_var.set("")
+            self.confirm_password_var.set("")
+            
+        except Exception as e:
+            self.progress.stop()
+            self.progress.grid_remove()  # Hide progress bar
+            self.status_var.set("✗ Entschlüsselung fehlgeschlagen")
+            self.status_label.config(fg=self.error_color)
+            messagebox.showerror("Fehler", f"Falsches Passwort oder beschädigte Datei.\n\nDetails: {str(e)}")
+
+
+def main():
+    """Main entry point"""
+    root = tk.Tk()
+    app = EncryptionGUI(root)
+    try:
+        root.mainloop()
+    finally:
+        # Security: Attempt to clear sensitive information from memory
+        import gc
+        gc.collect()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,3 @@
+Dies ist eine Demo-Testdatei für das Verschlüsselungs-Tool!
+Diese Datei wird jetzt verschlüsselt...
+Öffne die .encrypted Datei mit Doppelklick!
