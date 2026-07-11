@@ -1,7 +1,0 @@
-Dies ist eine Test-Datei für das Verschlüsselungstool.
-Diese Datei enthält mehrere Zeilen Text.
-
-Sie können diese Datei verwenden, um die Verschlüsselung zu testen.
-Das Tool sollte in der Lage sein, diese Datei zu verschlüsseln und wieder zu entschlüsseln.
-
-Viel Erfolg beim Testen!

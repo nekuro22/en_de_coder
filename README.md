@@ -1,91 +1,135 @@
-🔐 Verschlüsselungs-Tool - Quick Start Guide
-============================================
+# en_de_coder
 
-## Installation & Setup
+Cross-platform file & folder encryption CLI tool for Windows and Linux.
 
-1. **EXE ist compiliert:**
-   - Datei: `dist/Verschluesselungs-Tool.exe`
-   - Größe: ~50-70 MB
-   - Diese EXE kann überall hin kopiert werden
+## Installation
 
-2. **Dateityp registriert:**
-   - .encrypted Dateien sind jetzt mit Verschlüsselungs-Tool verknüpft
-   - Die Registrierung ist abgeschlossen ✓
+```bash
+pip install .
+```
 
-## So funktioniert es:
+Or in development mode:
 
-### Methode 1: Doppelklick auf .encrypted Datei
-1. Navigiere zu einer .encrypted Datei
-2. **Doppelklick** - Das Programm öffnet sich automatisch mit der Datei
-3. Gib dein Passwort ein
-4. Klick "Entschlüsseln"
+```bash
+pip install -e ".[dev]"
+```
 
-### Methode 2: Aus dem Programm verschlüsseln
-1. Öffne `Verschluesselungs-Tool.exe`
-2. Klick "📂" zum Aussuchen einer Datei/Ordner
-3. Gib ein sicheres Passwort ein (mind. 8 Zeichen) ⚠️
-4. Klick "🔒 Verschlüsseln"
+## Usage
 
-### Methode 3: Rechtsklick → Öffnen mit
-1. Rechtsklick auf eine .encrypted Datei
-2. "Öffnen mit" oder "Mit Programm öffnen"
-3. Wähle "Verschlüsselungs-Tool"
+### Encrypt a file
 
-## ⚠️ WICHTIG:
+```bash
+enc encrypt document.pdf
+# Prompts for password, creates document.pdf.encrypted
 
-- **Passwort merken!** - Verschlüsselte Dateien können nicht ohne Passwort wiederhergestellt werden
-- **Starkes Passwort!** - Mindestens 8 Zeichen, mit Großbuchstaben, Zahlen und Sonderzeichen
-- **Passwort Generator** - Klick das 🎲 Symbol für ein sicheres Passwort
+enc encrypt document.pdf -p MySecretPass123!
+# Uses password directly (visible in process list - use with caution)
 
-## Verfügbare Algorithmen:
+enc encrypt folder/ -a chacha20
+# Encrypt a folder with ChaCha20 algorithm
 
-1. **🥇 AES-256-GCM** (EMPFOHLEN)
-   - Stärkste Sicherheit
-   - Authenticated encryption
-   - ~30% schneller als ChaCha20
+enc encrypt document.pdf -t 30m
+# Time-lock: password optional after 30 minutes
 
-2. **ChaCha20-Poly1305**
-   - Moderne Alternative
-   - CPU-effizient
-   - Gut für alte Hardware
+enc encrypt secret.txt -t 1d -a chacha20
+# Time-lock for 1 day with ChaCha20 algorithm
+```
 
-3. **AES-256-Fernet**
-   - Fallback Option
-   - Einfacher Standard
-   - Kompatibilität
+### Decrypt a file
 
-## Verschlüsselte Dateien identifizieren:
+```bash
+enc decrypt document.pdf.encrypted
+# Prompts for password, restores original file
 
-Verschlüsselte Dateien haben die Endung **.encrypted**
-Beispiele:
-- `dokument.pdf.encrypted`
-- `foto.jpg.encrypted`
-- `ordner.zip.encrypted`
+enc decrypt document.pdf.encrypted -o restored.pdf
+# Specify output path
 
-## Sicherheitsfeatures:
+enc decrypt document.pdf.encrypted -p MySecretPass123!
+# Decrypt with password directly
 
-✓ Argon2id Key Derivation (OWASP-empfohlen)
-✓ 32-Byte Zufall-Salt pro Datei
-✓ PBKDF2-SHA512 Fallback
-✓ Anti-Brute-Force Schutz (exponentielles Backoff)
-✓ Keine identifizierbaren Header
-✓ Metadaten-Validierung
+# If file was encrypted with -t, after TTL expires:
+enc decrypt document.pdf.encrypted
+# No password needed after time-lock expires
+```
 
-## Technische Spezifikationen:
+### Show file info
 
-- Passwort-Minimallänge: 8 Zeichen
-- Salt-Länge: 32 Bytes (256 Bits)
-- Argon2id Parameter:
-  - Memory: 64 MB
-  - Time: 3
-  - Parallelism: 4
-- File Format: proprietary (sicher)
+```bash
+enc info document.pdf.encrypted
+# Shows algorithm, original name, type, and file size
+```
 
-## Support:
+### Register file type
 
-Wenn eine .encrypted Datei nicht öffnet:
-1. Stelle sicher, dass die Registrierung lief
-2. Versuche: Rechtsklick → "Mit Programm öffnen"
-3. Wähle `Verschluesselungs-Tool.exe` manuell
+```bash
+enc register
+# Associates .encrypted files with this tool (Windows & Linux)
+```
 
-Das war's! Viel Spaß mit sicherer Verschlüsselung! 🔒
+### Generate password
+
+```bash
+enc generate-password
+# Generates a 16-character secure password
+
+enc generate-password -l 32
+# Generates a 32-character password
+```
+
+## CLI Reference
+
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `enc encrypt <input>` | `enc e` | Encrypt a file or folder |
+| `enc decrypt <input>` | `enc d` | Decrypt a file or folder |
+| `enc info <file>` | `enc i` | Show encrypted file metadata |
+| `enc register` | `enc r` | Register .encrypted file type |
+| `enc generate-password` | `enc g` | Generate a secure password |
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `-p, --password` | Password (prompted interactively if omitted) |
+| `-o, --output` | Output path |
+| `-a, --algorithm` | Algorithm: `aes-gcm` (default), `chacha20`, `fernet` |
+| `-t, --time` | Time-lock duration (e.g. `20s`, `5m`, `2h`, `1d`). Password optional after expiry. |
+| `-f, --force` | Overwrite without asking |
+| `-l, --length` | Password length for `generate-password` (default: 16) |
+
+## Algorithms
+
+| Algorithm | Description |
+|-----------|-------------|
+| `aes-gcm` | AES-256-GCM - Recommended (default) |
+| `chacha20` | ChaCha20-Poly1305 - Modern, CPU-efficient |
+| `fernet` | AES-256-Fernet - Compatibility fallback |
+
+## Security Features
+
+- Argon2id key derivation (OWASP recommended)
+- 32-byte random salt per file
+- PBKDF2-SHA512 fallback (600k iterations)
+- Anti-brute-force protection (exponential backoff)
+- No identifiable file headers
+- Metadata validation
+- Time-lock encryption (TTL-based password optionality)
+
+## Backward Compatibility
+
+The old `file_encryptor.py` interface still works:
+
+```python
+from file_encryptor import FileEncryptor
+
+encryptor = FileEncryptor()
+encryptor.encrypt_file("input.txt", "input.txt.encrypted", "password", "aes-gcm")
+encryptor.decrypt_file("input.txt.encrypted", "output.txt", "password")
+```
+
+## Running Tests
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
