@@ -109,10 +109,20 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         size = os.path.getsize(output_path)
-        print(f"Encrypted: {output_path} ({size:,} bytes)")
+        print(f"{input_path} -> {output_path} ({size:,} bytes)")
         print(f"Algorithm: {algorithm}")
         if ttl is not None:
             print(f"Time-lock:  {args.time} (expires in {format_duration(ttl)})")
+
+        # Delete original after successful encryption
+        if args.delete_original:
+            import shutil
+            if os.path.isfile(input_path):
+                os.remove(input_path)
+                print(f"Deleted:   {input_path}")
+            elif os.path.isdir(input_path):
+                shutil.rmtree(input_path)
+                print(f"Deleted:   {input_path}")
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -183,7 +193,7 @@ def cmd_decrypt(args: argparse.Namespace) -> None:
         else:
             encryptor.decrypt_file(input_path, output_path, password)
 
-        print(f"Decrypted: {output_path}")
+        print(f"{input_path} -> {output_path}")
         print(f"Algorithm: {info['algorithm']}")
     except Exception as e:
         print(f"Error: Wrong password or corrupted file. {e}", file=sys.stderr)
@@ -275,6 +285,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Time-lock duration (e.g. 20s, 5m, 2h, 1d). Password optional after expiry.",
     )
     enc.add_argument("-f", "--force", action="store_true", help="Overwrite without asking")
+    enc.add_argument(
+        "-x", "--delete-original",
+        action="store_true",
+        help="Delete original file/folder after successful encryption",
+    )
 
     # decrypt
     dec = subparsers.add_parser("decrypt", aliases=["d"], help="Decrypt a file or folder")
