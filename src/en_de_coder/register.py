@@ -1,5 +1,5 @@
 """
-Cross-platform file type registration for .encrypted files.
+Cross-platform file type registration for .enc files.
 
 Windows: Uses Windows Registry (requires admin for full functionality).
 Linux: Creates .desktop file and uses xdg-mime.
@@ -28,7 +28,7 @@ def _find_enc_command() -> str | None:
 
 
 def register_windows() -> bool:
-    """Register .encrypted file type in Windows Registry."""
+    """Register .enc file type in Windows Registry."""
     try:
         import winreg
     except ImportError:
@@ -56,13 +56,13 @@ def register_windows() -> bool:
 
         # Register file extension
         with winreg.CreateKey(
-            winreg.HKEY_CURRENT_USER, r"Software\Classes\.encrypted"
+            winreg.HKEY_CURRENT_USER, r"Software\Classes\.enc"
         ) as key:
             winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "EncryptedFile")
             winreg.SetValueEx(
                 key, "Content Type", 0, winreg.REG_SZ, "application/octet-stream"
             )
-        print("  Created .encrypted extension entry")
+        print("  Created .enc extension entry")
 
         # Register file type handler
         with winreg.CreateKey(
@@ -85,14 +85,14 @@ def register_windows() -> bool:
         # Try assoc command
         try:
             subprocess.run(
-                ["assoc", ".encrypted=EncryptedFile"],
+                ["assoc", ".enc=EncryptedFile"],
                 capture_output=True,
                 check=False,
             )
         except FileNotFoundError:
             pass
 
-        print("\nDone! .encrypted files are now associated with en_de_coder.")
+        print("\nDone! .enc files are now associated with en_de_coder.")
         print("You may need to restart Explorer or log out/in for changes to take effect.")
         return True
 
@@ -102,7 +102,7 @@ def register_windows() -> bool:
 
 
 def register_linux() -> bool:
-    """Register .encrypted file type on Linux using xdg-mime."""
+    """Register .enc file type on Linux using xdg-mime."""
     enc_path = _find_enc_command()
     if not enc_path:
         print("Error: Cannot find 'enc' command. Is it installed?", file=sys.stderr)
@@ -139,7 +139,7 @@ NoDisplay=true
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/x-encrypted">
     <comment>Encrypted file</comment>
-    <glob pattern="*.encrypted"/>
+    <glob pattern="*.enc"/>
     <icon name="lock"/>
   </mime-type>
 </mime-info>
@@ -152,13 +152,13 @@ NoDisplay=true
         # Update MIME database
         subprocess.run(["update-mime-database", mime_dir], capture_output=True, check=False)
 
-        # Set default application for .encrypted
+        # Set default application for .enc
         subprocess.run(
             ["xdg-mime", "default", "en-de-coder.desktop", "application/x-encrypted"],
             capture_output=True,
             check=False,
         )
-        print("  Set as default application for .encrypted files")
+        print("  Set as default application for .enc files")
 
         # Update desktop database
         subprocess.run(
@@ -167,7 +167,7 @@ NoDisplay=true
             check=False,
         )
 
-        print("\nDone! .encrypted files are now associated with en_de_coder.")
+        print("\nDone! .enc files are now associated with en_de_coder.")
         print("You may need to log out and back in for changes to take effect.")
         return True
 
@@ -177,7 +177,7 @@ NoDisplay=true
 
 
 def register() -> bool:
-    """Register .encrypted file type for the current platform."""
+    """Register .enc file type for the current platform."""
     system = platform.system()
 
     if system == "Windows":
@@ -186,5 +186,5 @@ def register() -> bool:
         return register_linux()
     else:
         print(f"Warning: File type registration not implemented for {system}.")
-        print("You can manually associate .encrypted files with the 'enc' command.")
+        print("You can manually associate .enc files with the 'enc' command.")
         return False

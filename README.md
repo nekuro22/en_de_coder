@@ -20,7 +20,7 @@ pip install -e ".[dev]"
 
 ```bash
 enc encrypt document.pdf
-# Prompts for password, creates document.pdf.encrypted
+# Prompts for password, creates document.pdf.enc and deletes the original file
 
 enc encrypt document.pdf -p MySecretPass123!
 # Uses password directly (visible in process list - use with caution)
@@ -38,24 +38,24 @@ enc encrypt secret.txt -t 1d -a chacha20
 ### Decrypt a file
 
 ```bash
-enc decrypt document.pdf.encrypted
-# Prompts for password, restores original file
+enc decrypt document.pdf.enc
+# Prompts for password, restores original file and deletes the .enc source
 
-enc decrypt document.pdf.encrypted -o restored.pdf
+enc decrypt document.pdf.enc -o restored.pdf
 # Specify output path
 
-enc decrypt document.pdf.encrypted -p MySecretPass123!
+enc decrypt document.pdf.enc -p MySecretPass123!
 # Decrypt with password directly
 
 # If file was encrypted with -t, after TTL expires:
-enc decrypt document.pdf.encrypted
+enc decrypt document.pdf.enc
 # No password needed after time-lock expires
 ```
 
 ### Show file info
 
 ```bash
-enc info document.pdf.encrypted
+enc info document.pdf.enc
 # Shows algorithm, original name, type, and file size
 ```
 
@@ -63,7 +63,7 @@ enc info document.pdf.encrypted
 
 ```bash
 enc register
-# Associates .encrypted files with this tool (Windows & Linux)
+# Associates .enc files with this tool (Windows & Linux)
 ```
 
 ### Generate password
@@ -83,7 +83,7 @@ enc generate-password -l 32
 | `enc encrypt <input>` | `enc e` | Encrypt a file or folder |
 | `enc decrypt <input>` | `enc d` | Decrypt a file or folder |
 | `enc info <file>` | `enc i` | Show encrypted file metadata |
-| `enc register` | `enc r` | Register .encrypted file type |
+| `enc register` | `enc r` | Register .enc file type |
 | `enc generate-password` | `enc g` | Generate a secure password |
 
 ### Options
@@ -123,8 +123,8 @@ The old `file_encryptor.py` interface still works:
 from file_encryptor import FileEncryptor
 
 encryptor = FileEncryptor()
-encryptor.encrypt_file("input.txt", "input.txt.encrypted", "password", "aes-gcm")
-encryptor.decrypt_file("input.txt.encrypted", "output.txt", "password")
+encryptor.encrypt_file("input.txt", "input.txt.enc", "password", "aes-gcm")
+encryptor.decrypt_file("input.txt.enc", "output.txt", "password")
 ```
 
 ## Running Tests

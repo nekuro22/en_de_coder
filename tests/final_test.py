@@ -27,7 +27,7 @@ try:
     print(f"\nErstelle Test-Datei: {test_file}")
 
     # Encrypt it
-    encrypted_file = test_file + ".encrypted"
+    encrypted_file = test_file + ".enc"
     password = "DemoPassword123!@#"
 
     encryptor = FileEncryptor()

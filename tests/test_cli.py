@@ -31,17 +31,17 @@ def test_parser_encrypt_aliases():
 def test_parser_decrypt():
     """Test decrypt command parsing."""
     parser = build_parser()
-    args = parser.parse_args(["decrypt", "myfile.txt.encrypted", "-p", "testpass123!"])
+    args = parser.parse_args(["decrypt", "myfile.txt.enc", "-p", "testpass123!"])
     assert args.command == "decrypt"
-    assert args.input == "myfile.txt.encrypted"
+    assert args.input == "myfile.txt.enc"
 
 
 def test_parser_info():
     """Test info command parsing."""
     parser = build_parser()
-    args = parser.parse_args(["info", "myfile.txt.encrypted"])
+    args = parser.parse_args(["info", "myfile.txt.enc"])
     assert args.command == "info"
-    assert args.input == "myfile.txt.encrypted"
+    assert args.input == "myfile.txt.enc"
 
 
 def test_parser_generate_password():
@@ -57,7 +57,7 @@ def test_encrypt_decrypt_roundtrip():
     tmpdir = tempfile.mkdtemp()
     try:
         test_file = os.path.join(tmpdir, "test_input.txt")
-        encrypted_file = os.path.join(tmpdir, "test_input.txt.encrypted")
+        encrypted_file = os.path.join(tmpdir, "test_input.txt.enc")
         decrypted_file = os.path.join(tmpdir, "test_output.txt")
 
         test_content = b"Hello World! This is a secret test content.\x00\xFF"
@@ -96,10 +96,14 @@ def test_encrypt_all_algorithms():
             f.write(test_content)
 
         for algo in ["aes-gcm", "chacha20", "fernet"]:
-            encrypted_file = os.path.join(tmpdir, f"test.{algo}.encrypted")
+            test_file_algo = os.path.join(tmpdir, f"algo_test_{algo}.txt")
+            with open(test_file_algo, "wb") as f:
+                f.write(test_content)
+
+            encrypted_file = os.path.join(tmpdir, f"test.{algo}.enc")
             decrypted_file = os.path.join(tmpdir, f"test.{algo}.dec.txt")
 
-            main(["encrypt", test_file, "-p", "TestPassword123!", "-a", algo,
+            main(["encrypt", test_file_algo, "-p", "TestPassword123!", "-a", algo,
                   "-o", encrypted_file, "-f"])
             assert os.path.exists(encrypted_file)
 
@@ -121,7 +125,7 @@ def test_info_command():
     tmpdir = tempfile.mkdtemp()
     try:
         test_file = os.path.join(tmpdir, "info_test.txt")
-        encrypted_file = os.path.join(tmpdir, "info_test.txt.encrypted")
+        encrypted_file = os.path.join(tmpdir, "info_test.txt.enc")
 
         with open(test_file, "wb") as f:
             f.write(b"Info test")
@@ -150,7 +154,7 @@ def test_folder_encrypt_decrypt():
         with open(os.path.join(folder, "subdir", "file2.txt"), "w") as f:
             f.write("File 2 content")
 
-        encrypted_file = os.path.join(tmpdir, "test_folder.encrypted")
+        encrypted_file = os.path.join(tmpdir, "test_folder.enc")
         output_folder = os.path.join(tmpdir, "restored")
 
         # Encrypt
@@ -177,7 +181,7 @@ def test_ttl_encrypt_decrypt():
     tmpdir = tempfile.mkdtemp()
     try:
         test_file = os.path.join(tmpdir, "ttl_test.txt")
-        enc_file = os.path.join(tmpdir, "ttl_test.txt.encrypted")
+        enc_file = os.path.join(tmpdir, "ttl_test.txt.enc")
         dec_file = os.path.join(tmpdir, "ttl_test_dec.txt")
 
         with open(test_file, "wb") as f:
@@ -221,7 +225,7 @@ def test_ttl_cli():
     tmpdir = tempfile.mkdtemp()
     try:
         test_file = os.path.join(tmpdir, "ttl_cli.txt")
-        enc_file = os.path.join(tmpdir, "ttl_cli.txt.encrypted")
+        enc_file = os.path.join(tmpdir, "ttl_cli.txt.enc")
 
         with open(test_file, "w") as f:
             f.write("TTL CLI test")

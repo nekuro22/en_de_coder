@@ -29,7 +29,7 @@ def test_encryption_decryption():
         print(f"Created test file: {test_file}")
 
         # Encrypt
-        encrypted_file = os.path.join(tmpdir, "test_input.txt.encrypted")
+        encrypted_file = os.path.join(tmpdir, "test_input.txt.enc")
         password = "TestPassword123!@#"
         algorithm = "aes-gcm"
 

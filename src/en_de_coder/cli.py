@@ -4,7 +4,7 @@ CLI interface for en_de_coder.
 Usage:
     enc encrypt <input> [options]
     enc decrypt <input> [options]
-    enc info <file.encrypted>
+    enc info <file.enc>
     enc register
     enc generate-password
 """
@@ -83,7 +83,7 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
     if args.output:
         output_path = args.output
     else:
-        output_path = input_path + ".encrypted"
+        output_path = input_path + ".enc"
 
     if not args.force and not _confirm_overwrite(output_path):
         print("Aborted.", file=sys.stderr)
@@ -109,14 +109,13 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
             print(f"Time-lock:  {args.time} (expires in {format_duration(ttl)})")
 
         # Delete original after successful encryption
-        if args.delete_original:
-            import shutil
-            if os.path.isfile(input_path):
-                os.remove(input_path)
-                print(f"Deleted:   {input_path}")
-            elif os.path.isdir(input_path):
-                shutil.rmtree(input_path)
-                print(f"Deleted:   {input_path}")
+        import shutil
+        if os.path.isfile(input_path):
+            os.remove(input_path)
+            print(f"Deleted:   {input_path}")
+        elif os.path.isdir(input_path):
+            shutil.rmtree(input_path)
+            print(f"Deleted:   {input_path}")
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -189,6 +188,11 @@ def cmd_decrypt(args: argparse.Namespace) -> None:
 
         print(f"{input_path} -> {output_path}")
         print(f"Algorithm: {info['algorithm']}")
+
+        # Delete encrypted source after successful decryption
+        if os.path.exists(input_path):
+            os.remove(input_path)
+            print(f"Deleted:   {input_path}")
     except Exception as e:
         print(f"Error: Wrong password or corrupted file. {e}", file=sys.stderr)
         sys.exit(1)
@@ -227,7 +231,7 @@ def cmd_info(args: argparse.Namespace) -> None:
 
 
 def cmd_register(args: argparse.Namespace) -> None:
-    """Register .encrypted file type for the current platform."""
+    """Register .enc file type for the current platform."""
     from en_de_coder.register import register
 
     register()
@@ -265,7 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
     enc = subparsers.add_parser("encrypt", aliases=["e"], help="Encrypt a file or folder")
     enc.add_argument("input", help="File or folder to encrypt")
     enc.add_argument("-p", "--password", help="Password (prompted if omitted)")
-    enc.add_argument("-o", "--output", help="Output path (default: input.encrypted)")
+    enc.add_argument("-o", "--output", help="Output path (default: input.enc)")
     enc.add_argument(
         "-a",
         "--algorithm",
@@ -279,11 +283,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Time-lock duration (e.g. 20s, 5m, 2h, 1d). Password optional after expiry.",
     )
     enc.add_argument("-f", "--force", action="store_true", help="Overwrite without asking")
-    enc.add_argument(
-        "-x", "--delete-original",
-        action="store_true",
-        help="Delete original file/folder after successful encryption",
-    )
 
     # decrypt
     dec = subparsers.add_parser("decrypt", aliases=["d"], help="Decrypt a file or folder")
@@ -297,7 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
     info.add_argument("input", help="Encrypted file to inspect")
 
     # register
-    subparsers.add_parser("register", aliases=["r"], help="Register .encrypted file type")
+    subparsers.add_parser("register", aliases=["r"], help="Register .enc file type")
 
     # generate-password
     gen = subparsers.add_parser("generate-password", aliases=["g"], help="Generate a secure password")

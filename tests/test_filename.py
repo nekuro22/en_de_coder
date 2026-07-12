@@ -24,7 +24,7 @@ try:
     print(f"Original-Datei: {test_file}")
 
     # Encrypt
-    encrypted_file = test_file + ".encrypted"
+    encrypted_file = test_file + ".enc"
     encryptor = FileEncryptor()
     encryptor.encrypt_file(test_file, encrypted_file, "Demo123!@#", "aes-gcm")
 
@@ -56,7 +56,7 @@ try:
         print(f"Status: Erfolgreich!")
         print(f"\nBeim Entschluesseln schlaegt das Programm vor:")
         print(f"  Dateiname: {metadata.get('n')}")
-        print(f"  Verzeichnis: (Das Verzeichnis der .encrypted Datei)")
+        print(f"  Verzeichnis: (Das Verzeichnis der .enc Datei)")
     else:
         print("FAILED!")
 finally:
