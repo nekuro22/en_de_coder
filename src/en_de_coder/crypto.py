@@ -213,7 +213,7 @@ class FileEncryptor:
         Args:
             input_path: Path to the file to encrypt.
             output_path: Path to write the encrypted file.
-            password: Password for encryption (min 8 chars).
+            password: Password for encryption.
             algorithm: CLI algorithm name (aes-gcm, chacha20, fernet).
             ttl: Time-to-live in seconds. After this time, password is optional on decrypt.
 
@@ -222,8 +222,8 @@ class FileEncryptor:
         """
         if not os.path.isfile(input_path):
             raise ValueError(f"File not found: {input_path}")
-        if not password or len(password) < 8:
-            raise ValueError("Password must be at least 8 characters long")
+        if not password or not isinstance(password, str):
+            raise ValueError("Password is required")
 
         algo_internal = ALGO_MAP_CLI_TO_INTERNAL.get(algorithm)
         if algo_internal is None:
@@ -362,8 +362,8 @@ class FileEncryptor:
         """Encrypt a folder by zipping and encrypting it."""
         if not os.path.isdir(folder_path):
             raise ValueError(f"Invalid folder path: {folder_path}")
-        if not password or len(password) < 8:
-            raise ValueError("Password must be at least 8 characters long")
+        if not password or not isinstance(password, str):
+            raise ValueError("Password is required")
 
         algo_internal = ALGO_MAP_CLI_TO_INTERNAL.get(algorithm)
         if algo_internal is None:

@@ -35,17 +35,11 @@ def _get_password(args: argparse.Namespace, confirm: bool = False) -> str:
     """Get password from args or interactively."""
     password = getattr(args, "password", None)
     if password:
-        if len(password) < 8:
-            print("Error: Password must be at least 8 characters long.", file=sys.stderr)
-            sys.exit(1)
         return password
 
     password = getpass.getpass("Enter password: ")
     if not password:
         print("Error: Password cannot be empty.", file=sys.stderr)
-        sys.exit(1)
-    if len(password) < 8:
-        print("Error: Password must be at least 8 characters long.", file=sys.stderr)
         sys.exit(1)
 
     if confirm:
@@ -242,8 +236,8 @@ def cmd_register(args: argparse.Namespace) -> None:
 def cmd_generate_password(args: argparse.Namespace) -> None:
     """Generate a secure random password."""
     length = args.length or 16
-    if length < 8:
-        print("Error: Password length must be at least 8.", file=sys.stderr)
+    if length < 1:
+        print("Error: Password length must be at least 1.", file=sys.stderr)
         sys.exit(1)
 
     characters = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
