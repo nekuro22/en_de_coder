@@ -374,7 +374,7 @@ class FileEncryptor:
             folder_path_obj = Path(folder_path)
             for file_path in folder_path_obj.rglob("*"):
                 if file_path.is_file():
-                    arcname = file_path.relative_to(folder_path_obj.parent)
+                    arcname = file_path.relative_to(folder_path_obj)
                     zipf.write(file_path, arcname)
 
         zip_data = zip_buffer.getvalue()

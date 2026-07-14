@@ -165,8 +165,8 @@ def test_folder_encrypt_decrypt():
         os.makedirs(output_folder, exist_ok=True)
         main(["decrypt", encrypted_file, "-p", "FolderPass123!", "-o", output_folder, "-f"])
 
-        assert os.path.exists(os.path.join(output_folder, "test_folder", "file1.txt"))
-        assert os.path.exists(os.path.join(output_folder, "test_folder", "subdir", "file2.txt"))
+        assert os.path.exists(os.path.join(output_folder, "file1.txt"))
+        assert os.path.exists(os.path.join(output_folder, "subdir", "file2.txt"))
 
         print("  Folder encrypt/decrypt test PASSED")
     finally:
