@@ -253,6 +253,19 @@ def cmd_generate_password(args: argparse.Namespace) -> None:
     print("Decryption is impossible without it.")
 
 
+def cmd_gui(args: argparse.Namespace) -> None:
+    """Launch the GUI application."""
+    try:
+        import tkinter as tk
+    except ImportError:
+        print("Error: tkinter is not available.", file=sys.stderr)
+        print("On Ubuntu/Debian: sudo apt install python3-tk", file=sys.stderr)
+        sys.exit(1)
+
+    from en_de_coder.gui.app import main
+    main()
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -261,6 +274,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    parser.add_argument(
+        "--gui", action="store_true", help="Launch the GUI application"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -302,6 +318,9 @@ def build_parser() -> argparse.ArgumentParser:
     gen = subparsers.add_parser("generate-password", aliases=["g"], help="Generate a secure password")
     gen.add_argument("-l", "--length", type=int, default=16, help="Password length (default: 16)")
 
+    # gui
+    subparsers.add_parser("gui", help="Launch the GUI application")
+
     return parser
 
 
@@ -309,6 +328,10 @@ def main(argv: list[str] | None = None) -> None:
     """Main entry point."""
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.gui:
+        cmd_gui(args)
+        return
 
     if not args.command:
         parser.print_help()
@@ -325,6 +348,7 @@ def main(argv: list[str] | None = None) -> None:
         "r": cmd_register,
         "generate-password": cmd_generate_password,
         "g": cmd_generate_password,
+        "gui": cmd_gui,
     }
 
     cmd_func = commands.get(args.command)

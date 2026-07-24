@@ -46,6 +46,10 @@ def parse_duration(duration: str) -> int:
             "Examples: 20s, 5m, 2h, 1d"
         )
     value = int(match.group(1))
+    if value == 0:
+        raise ValueError(
+            f"Invalid duration: '{duration}'. Duration must be greater than 0."
+        )
     unit = match.group(2)
     multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
     return value * multipliers[unit]
@@ -62,11 +66,27 @@ def format_duration(seconds: int) -> str:
     elif seconds < 86400:
         h = seconds // 3600
         m = (seconds % 3600) // 60
-        return f"{h}h {m}m" if m else f"{h}h"
+        s = seconds % 60
+        if m and s:
+            return f"{h}h {m}m {s}s"
+        elif m:
+            return f"{h}h {m}m"
+        elif s:
+            return f"{h}h {s}s"
+        else:
+            return f"{h}h"
     else:
         d = seconds // 86400
         h = (seconds % 86400) // 3600
-        return f"{d}d {h}h" if h else f"{d}d"
+        m = (seconds % 3600) // 60
+        if h and m:
+            return f"{d}d {h}h {m}m"
+        elif h:
+            return f"{d}d {h}h"
+        elif m:
+            return f"{d}d {m}m"
+        else:
+            return f"{d}d"
 
 
 class EncryptionBackend:
@@ -370,16 +390,19 @@ class FileEncryptor:
             raise ValueError(f"Unknown algorithm: {algorithm}")
 
         zip_buffer = io.BytesIO()
+        file_count = 0
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
             folder_path_obj = Path(folder_path)
             for file_path in folder_path_obj.rglob("*"):
                 if file_path.is_file():
                     arcname = file_path.relative_to(folder_path_obj)
                     zipf.write(file_path, arcname)
+                    file_count += 1
+
+        if file_count == 0:
+            raise ValueError("Folder is empty or contains no files")
 
         zip_data = zip_buffer.getvalue()
-        if len(zip_data) == 0:
-            raise ValueError("Folder is empty or contains no files")
 
         salt = os.urandom(32)
         key = self._derive_key(password, salt, algo_internal)

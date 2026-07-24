@@ -1,3 +1,3 @@
-"""en_de_coder - Cross-platform file & folder encryption CLI tool."""
+"""en_de_coder - Cross-platform file & folder encryption tool with GUI."""
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"
