@@ -10,6 +10,7 @@ from en_de_coder.gui.tabs.encrypt_tab import EncryptTab
 from en_de_coder.gui.tabs.decrypt_tab import DecryptTab
 from en_de_coder.gui.tabs.info_tab import InfoTab
 from en_de_coder.gui.tabs.password_tab import PasswordTab
+from en_de_coder.gui.tabs.keyfile_tab import KeyfileTab
 from en_de_coder.gui.tabs.register_tab import RegisterTab
 
 
@@ -44,6 +45,7 @@ class App(tk.Tk):
         self.notebook.add(DecryptTab(self.notebook, self.status_bar), text="Entschlüsseln")
         self.notebook.add(InfoTab(self.notebook, self.status_bar), text="Info")
         self.notebook.add(PasswordTab(self.notebook, self.status_bar), text="Passwort")
+        self.notebook.add(KeyfileTab(self.notebook, self.status_bar), text="Key-Datei")
         self.notebook.add(RegisterTab(self.notebook, self.status_bar), text="Registrieren")
 
 

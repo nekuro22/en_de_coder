@@ -79,6 +79,12 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
 
+    # Validate keyfile
+    keyfile_path = getattr(args, "keyfile", None)
+    if keyfile_path and not os.path.isfile(keyfile_path):
+        print(f"Error: Key file not found: {keyfile_path}", file=sys.stderr)
+        sys.exit(1)
+
     # Determine output path
     if args.output:
         output_path = args.output
@@ -94,10 +100,10 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
     try:
         if os.path.isfile(input_path):
             print(f"Encrypting file: {input_path}")
-            encryptor.encrypt_file(input_path, output_path, password, algorithm, ttl=ttl)
+            encryptor.encrypt_file(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path)
         elif os.path.isdir(input_path):
             print(f"Encrypting folder: {input_path}")
-            encryptor.encrypt_folder(input_path, output_path, password, algorithm, ttl=ttl)
+            encryptor.encrypt_folder(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path)
         else:
             print(f"Error: '{input_path}' is not a file or folder.", file=sys.stderr)
             sys.exit(1)
@@ -107,6 +113,8 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
         print(f"Algorithm: {algorithm}")
         if ttl is not None:
             print(f"Time-lock:  {args.time} (expires in {format_duration(ttl)})")
+        if keyfile_path:
+            print(f"Key-file:   {keyfile_path}")
 
         # Delete original after successful encryption
         import shutil
@@ -140,6 +148,17 @@ def cmd_decrypt(args: argparse.Namespace) -> None:
         info = encryptor.get_file_info(input_path)
     except Exception as e:
         print(f"Error: Cannot read file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Check if keyfile is required
+    if info.get("has_keyfile") and not getattr(args, "keyfile", None):
+        print("Error: This file was encrypted with a key file. Use --keyfile <path>.", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate keyfile
+    keyfile_path = getattr(args, "keyfile", None)
+    if keyfile_path and not os.path.isfile(keyfile_path):
+        print(f"Error: Key file not found: {keyfile_path}", file=sys.stderr)
         sys.exit(1)
 
     ttl_status = info.get("ttl_status", "none")
@@ -182,9 +201,9 @@ def cmd_decrypt(args: argparse.Namespace) -> None:
         print(f"Decrypting: {input_path}")
         if is_folder:
             os.makedirs(output_path, exist_ok=True)
-            encryptor.decrypt_folder(input_path, output_path, password or "")
+            encryptor.decrypt_folder(input_path, output_path, password, keyfile_path=keyfile_path)
         else:
-            encryptor.decrypt_file(input_path, output_path, password)
+            encryptor.decrypt_file(input_path, output_path, password, keyfile_path=keyfile_path)
 
         print(f"{input_path} -> {output_path}")
         print(f"Algorithm: {info['algorithm']}")
@@ -253,6 +272,37 @@ def cmd_generate_password(args: argparse.Namespace) -> None:
     print("Decryption is impossible without it.")
 
 
+def cmd_generate_keyfile(args: argparse.Namespace) -> None:
+    """Generate a secure random key file."""
+    length = args.length or 256
+    if length < 16:
+        print("Error: Key length must be at least 16 bytes.", file=sys.stderr)
+        sys.exit(1)
+
+    keyfile_data = os.urandom(length)
+
+    output = getattr(args, "output", None)
+    if output:
+        if os.path.exists(output):
+            try:
+                answer = input(f"Overwrite existing file '{output}'? [y/N] ").strip().lower()
+                if answer not in ("y", "yes"):
+                    print("Aborted.", file=sys.stderr)
+                    sys.exit(1)
+            except (EOFError, KeyboardInterrupt):
+                sys.exit(1)
+
+        with open(output, "wb") as f:
+            f.write(keyfile_data)
+        print(f"Key file created: {output} ({length} bytes)")
+        print()
+        print("IMPORTANT: This key file is required for decryption!")
+        print("Store it securely (USB stick, external drive, etc.)")
+        print("Losing it means permanent data loss.")
+    else:
+        sys.stdout.buffer.write(keyfile_data)
+
+
 def cmd_gui(args: argparse.Namespace) -> None:
     """Launch the GUI application."""
     try:
@@ -299,6 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Time-lock duration (e.g. 20s, 5m, 2h, 1d). Password optional after expiry.",
     )
     enc.add_argument("-f", "--force", action="store_true", help="Overwrite without asking")
+    enc.add_argument("-k", "--keyfile", help="Key file for additional security (second factor)")
 
     # decrypt
     dec = subparsers.add_parser("decrypt", aliases=["d"], help="Decrypt a file or folder")
@@ -306,6 +357,7 @@ def build_parser() -> argparse.ArgumentParser:
     dec.add_argument("-p", "--password", help="Password (prompted if omitted)")
     dec.add_argument("-o", "--output", help="Output path (default: original name)")
     dec.add_argument("-f", "--force", action="store_true", help="Overwrite without asking")
+    dec.add_argument("-k", "--keyfile", help="Key file (required if encrypted with one)")
 
     # info
     info = subparsers.add_parser("info", aliases=["i"], help="Show encrypted file metadata")
@@ -317,6 +369,11 @@ def build_parser() -> argparse.ArgumentParser:
     # generate-password
     gen = subparsers.add_parser("generate-password", aliases=["g"], help="Generate a secure password")
     gen.add_argument("-l", "--length", type=int, default=16, help="Password length (default: 16)")
+
+    # generate-keyfile
+    gk = subparsers.add_parser("generate-keyfile", aliases=["k"], help="Generate a secure key file")
+    gk.add_argument("-o", "--output", help="Output path (default: stdout)")
+    gk.add_argument("-l", "--length", type=int, default=256, help="Key length in bytes (default: 256)")
 
     # gui
     subparsers.add_parser("gui", help="Launch the GUI application")
@@ -348,6 +405,8 @@ def main(argv: list[str] | None = None) -> None:
         "r": cmd_register,
         "generate-password": cmd_generate_password,
         "g": cmd_generate_password,
+        "generate-keyfile": cmd_generate_keyfile,
+        "k": cmd_generate_keyfile,
         "gui": cmd_gui,
     }
 

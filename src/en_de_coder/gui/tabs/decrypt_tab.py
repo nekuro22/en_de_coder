@@ -50,6 +50,13 @@ class DecryptTab(ttk.Frame):
         self.password_field = PasswordField(pw_frame, show_confirm=False)
         self.password_field.pack(fill="x")
 
+        # Key file (optional)
+        keyfile_frame = ttk.LabelFrame(self, text="Key-Datei (falls verschlüsselt damit)", padding=10)
+        keyfile_frame.pack(fill="x", **padding)
+
+        self.keyfile_selector = FileSelector(keyfile_frame, label="Key-Datei:", mode="file")
+        self.keyfile_selector.pack(fill="x")
+
         # Output
         out_frame = ttk.LabelFrame(self, text="Ausgabe (optional)", padding=10)
         out_frame.pack(fill="x", **padding)
@@ -86,6 +93,7 @@ class DecryptTab(ttk.Frame):
                 f"Originalname: {info['original_name']}",
                 f"Typ: {file_type}",
                 f"Größe: {info['file_size']:,} Bytes",
+                f"Key-Datei: {'Erforderlich' if info.get('has_keyfile') else 'Nein'}",
             ]
 
             ttl_status = info.get("ttl_status", "none")
@@ -115,6 +123,12 @@ class DecryptTab(ttk.Frame):
 
         output_path = self.output_selector.get().strip() or None
 
+        # Key file (optional)
+        keyfile_path = self.keyfile_selector.get().strip() or None
+        if keyfile_path and not os.path.isfile(keyfile_path):
+            messagebox.showerror("Fehler", f"Key-Datei nicht gefunden:\n{keyfile_path}")
+            return
+
         self.decrypt_btn.configure(state="disabled")
         self.status_bar.set("Entschlüsselung läuft...")
 
@@ -127,6 +141,10 @@ class DecryptTab(ttk.Frame):
                 info = encryptor.get_file_info(input_path)
                 is_folder = info["is_folder"]
                 original_name = info["original_name"]
+
+                # Check if keyfile is required
+                if info.get("has_keyfile") and not keyfile_path:
+                    raise ValueError("Diese Datei wurde mit einer Key-Datei verschlüsselt. Bitte Key-Datei auswählen.")
 
                 # Check TTL
                 ttl_status = info.get("ttl_status", "none")
@@ -144,9 +162,9 @@ class DecryptTab(ttk.Frame):
 
                 if is_folder:
                     os.makedirs(out, exist_ok=True)
-                    encryptor.decrypt_folder(input_path, out, password or "")
+                    encryptor.decrypt_folder(input_path, out, password, keyfile_path=keyfile_path)
                 else:
-                    encryptor.decrypt_file(input_path, out, password)
+                    encryptor.decrypt_file(input_path, out, password, keyfile_path=keyfile_path)
 
                 msg = f"Erfolg: {out}"
 

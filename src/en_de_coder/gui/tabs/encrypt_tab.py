@@ -35,6 +35,13 @@ class EncryptTab(ttk.Frame):
         self.password_field = PasswordField(pw_frame, show_confirm=True)
         self.password_field.pack(fill="x")
 
+        # Key file (optional)
+        keyfile_frame = ttk.LabelFrame(self, text="Key-Datei (optional, Zweitfaktor)", padding=10)
+        keyfile_frame.pack(fill="x", **padding)
+
+        self.keyfile_selector = FileSelector(keyfile_frame, label="Key-Datei:", mode="file")
+        self.keyfile_selector.pack(fill="x")
+
         # Options
         opts_frame = ttk.LabelFrame(self, text="Optionen", padding=10)
         opts_frame.pack(fill="x", **padding)
@@ -107,6 +114,12 @@ class EncryptTab(ttk.Frame):
                 messagebox.showerror("Fehler", str(e))
                 return
 
+        # Key file (optional)
+        keyfile_path = self.keyfile_selector.get().strip() or None
+        if keyfile_path and not os.path.isfile(keyfile_path):
+            messagebox.showerror("Fehler", f"Key-Datei nicht gefunden:\n{keyfile_path}")
+            return
+
         output_path = self.output_selector.get().strip()
         if not output_path:
             output_path = input_path + ".enc"
@@ -123,9 +136,9 @@ class EncryptTab(ttk.Frame):
                 encryptor = FileEncryptor()
 
                 if os.path.isfile(input_path):
-                    encryptor.encrypt_file(input_path, output_path, password, algorithm, ttl=ttl)
+                    encryptor.encrypt_file(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path)
                 elif os.path.isdir(input_path):
-                    encryptor.encrypt_folder(input_path, output_path, password, algorithm, ttl=ttl)
+                    encryptor.encrypt_folder(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path)
                 else:
                     raise ValueError(f"Ungültiger Pfad: {input_path}")
 
