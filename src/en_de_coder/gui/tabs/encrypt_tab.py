@@ -15,6 +15,7 @@ class EncryptTab(ttk.Frame):
     def __init__(self, parent, status_bar, **kwargs):
         super().__init__(parent, **kwargs)
         self.status_bar = status_bar
+        self.advanced_visible = False
 
         self._build_ui()
 
@@ -29,60 +30,70 @@ class EncryptTab(ttk.Frame):
         self.input_selector.pack(fill="x")
 
         # Password
-        pw_frame = ttk.LabelFrame(self, text="Passwort", padding=10)
-        pw_frame.pack(fill="x", **padding)
+        self._pw_frame = ttk.LabelFrame(self, text="Passwort", padding=10)
+        self._pw_frame.pack(fill="x", **padding)
 
-        self.password_field = PasswordField(pw_frame, show_confirm=True)
+        self.password_field = PasswordField(self._pw_frame, show_confirm=True)
         self.password_field.pack(fill="x")
 
-        # Key file (optional)
-        keyfile_frame = ttk.LabelFrame(self, text="Key-Datei (optional, Zweitfaktor)", padding=10)
+        # Advanced section (hidden by default)
+        self.advanced_frame = ttk.Frame(self)
+
+        # Key file
+        keyfile_frame = ttk.LabelFrame(self.advanced_frame, text="Key-Datei (optional, Zweitfaktor)", padding=10)
         keyfile_frame.pack(fill="x", **padding)
 
         self.keyfile_selector = FileSelector(keyfile_frame, label="Key-Datei:", mode="file")
         self.keyfile_selector.pack(fill="x")
 
         # Options
-        opts_frame = ttk.LabelFrame(self, text="Optionen", padding=10)
+        opts_frame = ttk.LabelFrame(self.advanced_frame, text="Optionen", padding=10)
         opts_frame.pack(fill="x", **padding)
 
-        # Algorithm
-        algo_row = ttk.Frame(opts_frame)
-        algo_row.pack(fill="x", pady=(0, 5))
+        # Algorithm + TTL in one row
+        opts_row = ttk.Frame(opts_frame)
+        opts_row.pack(fill="x")
 
-        ttk.Label(algo_row, text="Algorithmus:").pack(side="left", padx=(0, 5))
+        ttk.Label(opts_row, text="Algo:").pack(side="left", padx=(0, 5))
         self.algo_var = tk.StringVar(value="aes-gcm")
-        algo_combo = ttk.Combobox(
-            algo_row,
+        ttk.Combobox(
+            opts_row,
             textvariable=self.algo_var,
             values=["aes-gcm", "chacha20", "fernet"],
             state="readonly",
-            width=20,
-        )
-        algo_combo.pack(side="left")
+            width=12,
+        ).pack(side="left", padx=(0, 15))
 
-        # TTL
-        ttl_row = ttk.Frame(opts_frame)
-        ttl_row.pack(fill="x")
-
-        ttk.Label(ttl_row, text="Time-lock (optional):").pack(side="left", padx=(0, 5))
+        ttk.Label(opts_row, text="Time-lock:").pack(side="left", padx=(0, 5))
         self.ttl_var = tk.StringVar()
-        ttk.Entry(ttl_row, textvariable=self.ttl_var, width=15).pack(side="left", padx=(0, 5))
-        ttk.Label(ttl_row, text="z.B. 5m, 2h, 1d").pack(side="left")
+        ttk.Entry(opts_row, textvariable=self.ttl_var, width=10).pack(side="left", padx=(0, 5))
+        ttk.Label(opts_row, text="z.B. 5m, 2h").pack(side="left")
 
         # Output path
-        out_frame = ttk.LabelFrame(self, text="Ausgabe (optional)", padding=10)
+        out_frame = ttk.LabelFrame(self.advanced_frame, text="Ausgabe (optional)", padding=10)
         out_frame.pack(fill="x", **padding)
 
         self.output_selector = FileSelector(out_frame, label="Ausgabedatei:", mode="save")
         self.output_selector.pack(fill="x")
 
-        # Encrypt button
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(fill="x", **padding)
+        # Bottom bar: toggle + button
+        bottom_frame = ttk.Frame(self)
+        bottom_frame.pack(fill="x", **padding)
 
-        self.encrypt_btn = ttk.Button(btn_frame, text="Verschlüsseln", command=self._encrypt)
+        self.toggle_btn = ttk.Button(bottom_frame, text="▶ Erweitert", command=self._toggle_advanced, width=12)
+        self.toggle_btn.pack(side="left")
+
+        self.encrypt_btn = ttk.Button(bottom_frame, text="Verschlüsseln", command=self._encrypt)
         self.encrypt_btn.pack(side="right")
+
+    def _toggle_advanced(self):
+        if self.advanced_visible:
+            self.advanced_frame.pack_forget()
+            self.toggle_btn.configure(text="▶ Erweitert")
+        else:
+            self.advanced_frame.pack(fill="x", after=self._pw_frame)
+            self.toggle_btn.configure(text="▼ Erweitert")
+        self.advanced_visible = not self.advanced_visible
 
     def _encrypt(self):
         input_path = self.input_selector.get().strip()

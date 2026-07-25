@@ -14,6 +14,7 @@ class DecryptTab(ttk.Frame):
     def __init__(self, parent, status_bar, **kwargs):
         super().__init__(parent, **kwargs)
         self.status_bar = status_bar
+        self.advanced_visible = False
 
         self._build_ui()
 
@@ -44,32 +45,47 @@ class DecryptTab(ttk.Frame):
         self.input_selector.path_var.trace_add("write", self._on_path_change)
 
         # Password
-        pw_frame = ttk.LabelFrame(self, text="Passwort", padding=10)
-        pw_frame.pack(fill="x", **padding)
+        self._pw_frame = ttk.LabelFrame(self, text="Passwort", padding=10)
+        self._pw_frame.pack(fill="x", **padding)
 
-        self.password_field = PasswordField(pw_frame, show_confirm=False)
+        self.password_field = PasswordField(self._pw_frame, show_confirm=False)
         self.password_field.pack(fill="x")
 
-        # Key file (optional)
-        keyfile_frame = ttk.LabelFrame(self, text="Key-Datei (falls verschlüsselt damit)", padding=10)
+        # Advanced section (hidden by default)
+        self.advanced_frame = ttk.Frame(self)
+
+        # Key file
+        keyfile_frame = ttk.LabelFrame(self.advanced_frame, text="Key-Datei (falls verschlüsselt damit)", padding=10)
         keyfile_frame.pack(fill="x", **padding)
 
         self.keyfile_selector = FileSelector(keyfile_frame, label="Key-Datei:", mode="file")
         self.keyfile_selector.pack(fill="x")
 
         # Output
-        out_frame = ttk.LabelFrame(self, text="Ausgabe (optional)", padding=10)
+        out_frame = ttk.LabelFrame(self.advanced_frame, text="Ausgabe (optional)", padding=10)
         out_frame.pack(fill="x", **padding)
 
         self.output_selector = FileSelector(out_frame, label="Ausgabedatei:", mode="save")
         self.output_selector.pack(fill="x")
 
-        # Decrypt button
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(fill="x", **padding)
+        # Bottom bar: toggle + button
+        bottom_frame = ttk.Frame(self)
+        bottom_frame.pack(fill="x", **padding)
 
-        self.decrypt_btn = ttk.Button(btn_frame, text="Entschlüsseln", command=self._decrypt)
+        self.toggle_btn = ttk.Button(bottom_frame, text="▶ Erweitert", command=self._toggle_advanced, width=12)
+        self.toggle_btn.pack(side="left")
+
+        self.decrypt_btn = ttk.Button(bottom_frame, text="Entschlüsseln", command=self._decrypt)
         self.decrypt_btn.pack(side="right")
+
+    def _toggle_advanced(self):
+        if self.advanced_visible:
+            self.advanced_frame.pack_forget()
+            self.toggle_btn.configure(text="▶ Erweitert")
+        else:
+            self.advanced_frame.pack(fill="x", after=self._pw_frame)
+            self.toggle_btn.configure(text="▼ Erweitert")
+        self.advanced_visible = not self.advanced_visible
 
     def _on_path_change(self, *_args):
         if self._info_after_id:
