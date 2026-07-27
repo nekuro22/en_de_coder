@@ -85,6 +85,18 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
         print(f"Error: Key file not found: {keyfile_path}", file=sys.stderr)
         sys.exit(1)
 
+    # Device binding
+    device_bound = getattr(args, "bind_device", False)
+    if device_bound:
+        try:
+            from en_de_coder.intern_key import is_initialized
+            if not is_initialized():
+                print("Error: Device not registered. Run 'enc install' first.", file=sys.stderr)
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error: Device binding unavailable: {e}", file=sys.stderr)
+            sys.exit(1)
+
     # Determine output path
     if args.output:
         output_path = args.output
@@ -100,10 +112,10 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
     try:
         if os.path.isfile(input_path):
             print(f"Encrypting file: {input_path}")
-            encryptor.encrypt_file(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path)
+            encryptor.encrypt_file(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path, device_bound=device_bound)
         elif os.path.isdir(input_path):
             print(f"Encrypting folder: {input_path}")
-            encryptor.encrypt_folder(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path)
+            encryptor.encrypt_folder(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path, device_bound=device_bound)
         else:
             print(f"Error: '{input_path}' is not a file or folder.", file=sys.stderr)
             sys.exit(1)
@@ -111,6 +123,8 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
         size = os.path.getsize(output_path)
         print(f"{input_path} -> {output_path} ({size:,} bytes)")
         print(f"Algorithm: {algorithm}")
+        if device_bound:
+            print(f"Binding:    device-bound")
         if ttl is not None:
             print(f"Time-lock:  {args.time} (expires in {format_duration(ttl)})")
         if keyfile_path:
@@ -238,6 +252,8 @@ def cmd_info(args: argparse.Namespace) -> None:
     print(f"Original name:  {info['original_name']}")
     print(f"Type:           {file_type}")
     print(f"Encrypted size: {info['file_size']:,} bytes")
+    if info.get("device_bound"):
+        print(f"Device-bound:   yes (decryption only on this device)")
 
     ttl_status = info.get("ttl_status", "none")
     if ttl_status == "expired":
@@ -316,6 +332,114 @@ def cmd_gui(args: argparse.Namespace) -> None:
     main()
 
 
+def cmd_install(args: argparse.Namespace) -> None:
+    """Register this device by generating an internal key."""
+    from en_de_coder.intern_key import is_initialized, initialize
+    from en_de_coder.hardware_id import get_short_hardware_id
+
+    if is_initialized():
+        print(f"Device already registered (ID: {get_short_hardware_id()}...)")
+        print("To re-register, delete the internal key file manually.")
+        return
+
+    hw_id = initialize()
+    print(f"Device registered successfully.")
+    print(f"Hardware ID: {hw_id}...")
+    print()
+    print("You can now use --bind-device / -b when encrypting files.")
+    print("Bound files can only be decrypted on this device.")
+
+
+def cmd_export_key(args: argparse.Namespace) -> None:
+    """Export the internal key file."""
+    from en_de_coder.intern_key import export_key, is_initialized
+
+    if not is_initialized():
+        print("Error: No internal key to export. Run 'enc install' first.", file=sys.stderr)
+        sys.exit(1)
+
+    output_path = args.output
+    if not output_path:
+        output_path = "intern_key_backup.dat"
+
+    if os.path.exists(output_path):
+        if not args.force:
+            try:
+                answer = input(f"Overwrite existing file '{output_path}'? [y/N] ").strip().lower()
+                if answer not in ("y", "yes"):
+                    print("Aborted.", file=sys.stderr)
+                    sys.exit(1)
+            except (EOFError, KeyboardInterrupt):
+                sys.exit(1)
+
+    try:
+        export_key(output_path)
+        print(f"Key exported to: {output_path}")
+        print()
+        print("WARNING: This key can be used to decrypt device-bound files.")
+        print("Only share with trusted people!")
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_import_key(args: argparse.Namespace) -> None:
+    """Import an internal key file, replacing the current one."""
+    from en_de_coder.intern_key import import_key, is_initialized
+
+    input_path = args.input
+    if not os.path.isfile(input_path):
+        print(f"Error: Key file not found: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if is_initialized():
+        print("WARNING: This will replace your current internal key!")
+        print("All files bound to the old key will NO LONGER be decryptable!")
+        print()
+        try:
+            answer = input("Type 'yes' to confirm: ").strip().lower()
+            if answer != "yes":
+                print("Aborted.", file=sys.stderr)
+                sys.exit(1)
+        except (EOFError, KeyboardInterrupt):
+            sys.exit(1)
+
+    try:
+        import_key(input_path)
+        print(f"Key imported from: {input_path}")
+        print("New key is now active.")
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_regenerate_key(args: argparse.Namespace) -> None:
+    """Regenerate the internal key."""
+    from en_de_coder.intern_key import is_initialized, regenerate_key
+    from en_de_coder.hardware_id import get_short_hardware_id
+
+    if is_initialized():
+        print("WARNING: This will generate a new internal key!")
+        print("The old key will be permanently deleted!")
+        print("All files bound to the old key will NO LONGER be decryptable!")
+        print()
+        try:
+            answer = input("Type 'yes' to confirm: ").strip().lower()
+            if answer != "yes":
+                print("Aborted.", file=sys.stderr)
+                sys.exit(1)
+        except (EOFError, KeyboardInterrupt):
+            sys.exit(1)
+
+    try:
+        hw_id = regenerate_key()
+        print(f"New key generated. Hardware ID: {hw_id}...")
+        print("All previously bound files are now inaccessible.")
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -350,6 +474,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enc.add_argument("-f", "--force", action="store_true", help="Overwrite without asking")
     enc.add_argument("-k", "--keyfile", help="Key file for additional security (second factor)")
+    enc.add_argument("-b", "--bind-device", action="store_true",
+                     help="Bind encrypted file to this device (requires device registration)")
 
     # decrypt
     dec = subparsers.add_parser("decrypt", aliases=["d"], help="Decrypt a file or folder")
@@ -375,6 +501,22 @@ def build_parser() -> argparse.ArgumentParser:
     gk.add_argument("-o", "--output", help="Output path (default: stdout)")
     gk.add_argument("-l", "--length", type=int, default=256, help="Key length in bytes (default: 256)")
 
+    # install (device registration)
+    subparsers.add_parser("install", help="Register this device for file binding")
+
+    # export-key
+    ek = subparsers.add_parser("export-key", help="Export the device internal key")
+    ek.add_argument("output", nargs="?", default="intern_key_backup.dat",
+                     help="Output path (default: intern_key_backup.dat)")
+    ek.add_argument("-f", "--force", action="store_true", help="Overwrite without asking")
+
+    # import-key
+    ik = subparsers.add_parser("import-key", help="Import a device internal key (replaces current)")
+    ik.add_argument("input", help="Key file to import")
+
+    # regenerate-key
+    subparsers.add_parser("regenerate-key", help="Generate a new internal key (deletes old)")
+
     # gui
     subparsers.add_parser("gui", help="Launch the GUI application")
 
@@ -389,6 +531,15 @@ def main(argv: list[str] | None = None) -> None:
     if args.gui:
         cmd_gui(args)
         return
+
+    # Auto-setup: generate internal key on first launch
+    try:
+        from en_de_coder.intern_key import is_initialized, initialize
+        if not is_initialized():
+            hw_id = initialize()
+            print(f"Device registered (ID: {hw_id}...)")
+    except Exception:
+        pass  # Silently skip if hardware_id fails on exotic platforms
 
     if not args.command:
         parser.print_help()
@@ -407,6 +558,10 @@ def main(argv: list[str] | None = None) -> None:
         "g": cmd_generate_password,
         "generate-keyfile": cmd_generate_keyfile,
         "k": cmd_generate_keyfile,
+        "install": cmd_install,
+        "export-key": cmd_export_key,
+        "import-key": cmd_import_key,
+        "regenerate-key": cmd_regenerate_key,
         "gui": cmd_gui,
     }
 
