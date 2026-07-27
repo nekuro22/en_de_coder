@@ -22,7 +22,7 @@ class App(tk.Tk):
         super().__init__()
 
         self.title(f"en_de_coder GUI v{__version__}")
-        self.geometry("700x550")
+        self.geometry("700x600")
         self.minsize(600, 450)
 
         # Auto-setup: generate internal key on first launch
