@@ -69,6 +69,22 @@ class EncryptTab(ttk.Frame):
         ttk.Entry(opts_row, textvariable=self.ttl_var, width=10).pack(side="left", padx=(0, 5))
         ttk.Label(opts_row, text="z.B. 5m, 2h").pack(side="left")
 
+        # Device binding checkbox
+        bind_frame = ttk.Frame(self.advanced_frame)
+        bind_frame.pack(fill="x", **padding)
+
+        self.bind_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            bind_frame,
+            text="Datei an dieses Gerät binden",
+            variable=self.bind_var,
+        ).pack(side="left")
+        ttk.Label(
+            bind_frame,
+            text="(nur auf diesem Gerät entschlüsselbar)",
+            foreground="gray",
+        ).pack(side="left", padx=(5, 0))
+
         # Output path
         out_frame = ttk.LabelFrame(self.advanced_frame, text="Ausgabe (optional)", padding=10)
         out_frame.pack(fill="x", **padding)
@@ -137,6 +153,18 @@ class EncryptTab(ttk.Frame):
 
         algorithm = self.algo_var.get()
 
+        # Device binding
+        device_bound = self.bind_var.get()
+        if device_bound:
+            try:
+                from en_de_coder.intern_key import is_initialized
+                if not is_initialized():
+                    messagebox.showerror("Fehler", "Gerät nicht registriert. Bitte starten Sie die App neu.")
+                    return
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Gerätebindung nicht verfügbar: {e}")
+                return
+
         # Disable button during operation
         self.encrypt_btn.configure(state="disabled")
         self.status_bar.set("Verschlüsselung läuft...")
@@ -147,14 +175,16 @@ class EncryptTab(ttk.Frame):
                 encryptor = FileEncryptor()
 
                 if os.path.isfile(input_path):
-                    encryptor.encrypt_file(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path)
+                    encryptor.encrypt_file(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path, device_bound=device_bound)
                 elif os.path.isdir(input_path):
-                    encryptor.encrypt_folder(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path)
+                    encryptor.encrypt_folder(input_path, output_path, password, algorithm, ttl=ttl, keyfile_path=keyfile_path, device_bound=device_bound)
                 else:
                     raise ValueError(f"Ungültiger Pfad: {input_path}")
 
                 size = os.path.getsize(output_path)
                 msg = f"Erfolg: {output_path} ({size:,} Bytes)"
+                if device_bound:
+                    msg += " [gerätegebunden]"
 
                 # Delete original after successful encryption
                 if os.path.isfile(input_path):

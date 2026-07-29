@@ -83,6 +83,18 @@ class InfoTab(ttk.Frame):
                     "",
                 ]
 
+                if info.get("device_bound"):
+                    lines.append("Gerätebindung:    JA (nur auf diesem Gerät entschlüsselbar)")
+                else:
+                    lines.append("Gerätebindung:    Nein")
+
+                if info.get("has_keyfile"):
+                    lines.append("Key-Datei:        Ja (Zweitfaktor)")
+                else:
+                    lines.append("Key-Datei:        Nein")
+
+                lines.append("")
+
                 ttl_status = info.get("ttl_status", "none")
                 if ttl_status == "locked":
                     remaining = info.get("ttl_remaining", 0)

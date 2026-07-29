@@ -1,6 +1,6 @@
 # en_de_coder
 
-Cross-platform file & folder encryption CLI tool for Windows and Linux.
+Cross-platform file & folder encryption CLI & GUI tool for Windows and Linux.
 
 ## Installation
 
@@ -96,6 +96,23 @@ enc generate-password -l 32
 | `-t, --time` | Time-lock duration (e.g. `20s`, `5m`, `2h`, `1d`). Password optional after expiry. |
 | `-f, --force` | Overwrite without asking |
 | `-l, --length` | Password length for `generate-password` (default: 16) |
+
+## GUI
+
+Start the GUI application:
+
+```bash
+python -m en_de_coder.gui
+```
+
+The GUI provides tabs for:
+- **Verschlüsseln**: Encrypt files and folders
+- **Entschlüsseln**: Decrypt .enc files
+- **Info**: Show encrypted file metadata
+- **Passwort**: Generate secure passwords
+- **Key-Datei**: Key file management
+- **Geräte-Key**: Hardware-based key
+- **Registrieren**: Register .enc file type
 
 ## Algorithms
 

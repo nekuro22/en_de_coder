@@ -12,6 +12,7 @@ from en_de_coder.gui.tabs.info_tab import InfoTab
 from en_de_coder.gui.tabs.password_tab import PasswordTab
 from en_de_coder.gui.tabs.keyfile_tab import KeyfileTab
 from en_de_coder.gui.tabs.register_tab import RegisterTab
+from en_de_coder.gui.tabs.intern_key_tab import InternKeyTab
 
 
 class App(tk.Tk):
@@ -21,8 +22,11 @@ class App(tk.Tk):
         super().__init__()
 
         self.title(f"en_de_coder GUI v{__version__}")
-        self.geometry("700x550")
+        self.geometry("700x600")
         self.minsize(600, 450)
+
+        # Auto-setup: generate internal key on first launch
+        self._run_auto_setup()
 
         # Style
         style = ttk.Style()
@@ -46,7 +50,19 @@ class App(tk.Tk):
         self.notebook.add(InfoTab(self.notebook, self.status_bar), text="Info")
         self.notebook.add(PasswordTab(self.notebook, self.status_bar), text="Passwort")
         self.notebook.add(KeyfileTab(self.notebook, self.status_bar), text="Key-Datei")
+        self.notebook.add(InternKeyTab(self.notebook, self.status_bar), text="Geräte-Key")
         self.notebook.add(RegisterTab(self.notebook, self.status_bar), text="Registrieren")
+
+    def _run_auto_setup(self):
+        """Generate internal key on first launch if not already done."""
+        try:
+            from en_de_coder.intern_key import is_initialized, initialize
+            from en_de_coder.hardware_id import get_short_hardware_id
+            if not is_initialized():
+                hw_id = initialize()
+                self.after(100, lambda: self.status_bar.set(f"Gerät registriert (ID: {hw_id}...)"))
+        except Exception:
+            pass
 
 
 def main():

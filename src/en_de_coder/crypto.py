@@ -205,14 +205,23 @@ class EncryptionBackend:
         cls._lockout_until.pop(lockout_key, None)
 
     @staticmethod
-    def derive_key(password: str, salt: bytes, algorithm: str, keyfile_content: bytes | None = None) -> bytes:
-        """Derive encryption key using Argon2id (memory-hard, GPU-resistant)."""
+    def derive_key(password: str, salt: bytes, algorithm: str, keyfile_content: bytes | None = None, intern_key: bytes | None = None) -> bytes:
+        """Derive encryption key using Argon2id (memory-hard, GPU-resistant).
+
+        Args:
+            password: User password.
+            salt: Random salt.
+            algorithm: Algorithm identifier (unused, kept for API consistency).
+            keyfile_content: Optional key-file content (second factor).
+            intern_key: Optional device-bound internal key (third factor).
+        """
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
+        material = password.encode("utf-8")
         if keyfile_content:
-            material = password.encode("utf-8") + keyfile_content
-        else:
-            material = password.encode("utf-8")
+            material = material + keyfile_content
+        if intern_key:
+            material = material + intern_key
 
         kdf = Argon2id(
             length=32,
@@ -224,15 +233,16 @@ class EncryptionBackend:
         return kdf.derive(material)
 
     @staticmethod
-    def derive_key_fallback(password: str, salt: bytes, algorithm: str, keyfile_content: bytes | None = None) -> bytes:
+    def derive_key_fallback(password: str, salt: bytes, algorithm: str, keyfile_content: bytes | None = None, intern_key: bytes | None = None) -> bytes:
         """Fallback: PBKDF2-SHA512 with 600k iterations."""
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+        material = password.encode("utf-8")
         if keyfile_content:
-            material = password.encode("utf-8") + keyfile_content
-        else:
-            material = password.encode("utf-8")
+            material = material + keyfile_content
+        if intern_key:
+            material = material + intern_key
 
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA512(),
@@ -329,11 +339,11 @@ class FileEncryptor:
     def _generate_header(self) -> bytes:
         return os.urandom(32)
 
-    def _derive_key(self, password: str, salt: bytes, algo_internal: str, keyfile_content: bytes | None = None) -> bytes:
+    def _derive_key(self, password: str, salt: bytes, algo_internal: str, keyfile_content: bytes | None = None, intern_key: bytes | None = None) -> bytes:
         try:
-            return EncryptionBackend.derive_key(password, salt, algo_internal, keyfile_content)
+            return EncryptionBackend.derive_key(password, salt, algo_internal, keyfile_content, intern_key)
         except Exception:
-            return EncryptionBackend.derive_key_fallback(password, salt, algo_internal, keyfile_content)
+            return EncryptionBackend.derive_key_fallback(password, salt, algo_internal, keyfile_content, intern_key)
 
     def _read_metadata(self, input_path: str) -> tuple[bytes, dict, bytes]:
         """Read header + metadata from an encrypted file.
@@ -375,6 +385,7 @@ class FileEncryptor:
         algorithm: str,
         ttl: int | None = None,
         keyfile_path: str | None = None,
+        device_bound: bool = False,
     ) -> bool:
         """Encrypt a file.
 
@@ -385,6 +396,7 @@ class FileEncryptor:
             algorithm: CLI algorithm name (aes-gcm, chacha20, fernet).
             ttl: Time-to-live in seconds. After this time, password is optional on decrypt.
             keyfile_path: Optional path to a key file for additional security.
+            device_bound: If True, file can only be decrypted on this device.
 
         Returns:
             True on success.
@@ -408,11 +420,17 @@ class FileEncryptor:
             if len(keyfile_content) == 0:
                 raise ValueError("Key file is empty")
 
+        # Load internal key if device binding is requested
+        intern_key = None
+        if device_bound:
+            from en_de_coder.intern_key import get_intern_key
+            intern_key = get_intern_key()
+
         with open(input_path, "rb") as f:
             data = f.read()
 
         salt = os.urandom(32)
-        key = self._derive_key(password, salt, algo_internal, keyfile_content)
+        key = self._derive_key(password, salt, algo_internal, keyfile_content, intern_key)
 
         encrypt_fn = ALGO_MAP_INTERNAL_TO_ENCRYPT_FN[algo_internal]
         encrypted_data = encrypt_fn(data, key)
@@ -430,6 +448,9 @@ class FileEncryptor:
 
         if keyfile_content:
             metadata["kf"] = True  # flag that a keyfile was used
+
+        if device_bound:
+            metadata["db"] = True  # flag that file is device-bound
 
         if ttl is not None and ttl > 0:
             expiry_timestamp = int(time.time()) + ttl
@@ -495,6 +516,19 @@ class FileEncryptor:
             with open(keyfile_path, "rb") as kf:
                 keyfile_content = kf.read()
 
+        # Load internal key if file is device-bound
+        intern_key = None
+        is_device_bound = metadata.get("db", False)
+        if is_device_bound:
+            from en_de_coder.intern_key import get_intern_key
+            try:
+                intern_key = get_intern_key()
+            except Exception:
+                raise ValueError(
+                    "This file is bound to a different device. "
+                    "Cannot decrypt on this machine."
+                )
+
         # Check TTL - if expired, password is not required
         ttl_expired = False
         expiry_timestamp = metadata.get("t")
@@ -531,8 +565,8 @@ class FileEncryptor:
                     f"Wrong password. Wait {format_duration(lockout_delay)} before trying again."
                 )
 
-        # Key derivation
-        key = self._derive_key(password, salt, algo_internal, keyfile_content)
+        # Key derivation (includes intern_key if device-bound)
+        key = self._derive_key(password, salt, algo_internal, keyfile_content, intern_key)
 
         decrypt_fn = ALGO_MAP_INTERNAL_TO_DECRYPT_FN.get(algo_internal)
         if decrypt_fn is None:
@@ -563,6 +597,7 @@ class FileEncryptor:
         algorithm: str,
         ttl: int | None = None,
         keyfile_path: str | None = None,
+        device_bound: bool = False,
     ) -> bool:
         """Encrypt a folder by zipping and encrypting it."""
         if not os.path.isdir(folder_path):
@@ -584,6 +619,12 @@ class FileEncryptor:
             if len(keyfile_content) == 0:
                 raise ValueError("Key file is empty")
 
+        # Load internal key if device binding is requested
+        intern_key = None
+        if device_bound:
+            from en_de_coder.intern_key import get_intern_key
+            intern_key = get_intern_key()
+
         zip_buffer = io.BytesIO()
         file_count = 0
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -600,7 +641,7 @@ class FileEncryptor:
         zip_data = zip_buffer.getvalue()
 
         salt = os.urandom(32)
-        key = self._derive_key(password, salt, algo_internal, keyfile_content)
+        key = self._derive_key(password, salt, algo_internal, keyfile_content, intern_key)
 
         encrypt_fn = ALGO_MAP_INTERNAL_TO_ENCRYPT_FN[algo_internal]
         encrypted_data = encrypt_fn(zip_data, key)
@@ -619,6 +660,9 @@ class FileEncryptor:
 
         if keyfile_content:
             metadata["kf"] = True
+
+        if device_bound:
+            metadata["db"] = True
 
         if ttl is not None and ttl > 0:
             expiry_timestamp = int(time.time()) + ttl
@@ -683,6 +727,19 @@ class FileEncryptor:
             with open(keyfile_path, "rb") as kf:
                 keyfile_content = kf.read()
 
+        # Load internal key if device-bound
+        intern_key = None
+        is_device_bound = metadata.get("db", False)
+        if is_device_bound:
+            from en_de_coder.intern_key import get_intern_key
+            try:
+                intern_key = get_intern_key()
+            except Exception:
+                raise ValueError(
+                    "This file is bound to a different device. "
+                    "Cannot decrypt on this machine."
+                )
+
         # Check TTL
         ttl_expired = False
         expiry_timestamp = metadata.get("t")
@@ -716,7 +773,7 @@ class FileEncryptor:
                 )
 
         # Key derivation
-        key = self._derive_key(password, salt, algo_internal, keyfile_content)
+        key = self._derive_key(password, salt, algo_internal, keyfile_content, intern_key)
 
         decrypt_fn = ALGO_MAP_INTERNAL_TO_DECRYPT_FN.get(algo_internal)
         if decrypt_fn is None:
@@ -750,6 +807,7 @@ class FileEncryptor:
             "file_size": os.path.getsize(input_path),
             "version": metadata.get("v", 1),
             "has_keyfile": metadata.get("kf", False),
+            "device_bound": metadata.get("db", False),
         }
 
         # TTL info
